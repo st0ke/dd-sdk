@@ -34,22 +34,50 @@ If you have questions concerning this license or the applicable additional terms
 
 static const char * const MAPGEN_SLOT_MATERIAL = "textures/common/mapgen_slot";
 static const char * const MAPGEN_OUTPUT_MAP = "maps/mapgen/current";
+static const char * const MAPGEN_HARDCODED_SLOT_NAME = "slot_0";
 
-typedef struct mapGenSlot_s {
+typedef struct mapgenSlot_s {
+	idStr		name;
 	idPlane		plane;
 	idVec3		center;
-	idVec3		rotationAxis;
-	idMat3		rotation;
+	idMat3		axis;
 	int			entityNum;
 	int			primitiveNum;
 	int			sideNum;
 	int			oppositeSideNum;
-} mapGenSlot_t;
+} mapgenSlot_t;
+
+class mapgenTransform {
+public:
+	idVec3		sourceCenter;
+	idVec3		destCenter;
+	idMat3		sourceAxis;
+	idMat3		destAxis;
+
+	void		SetJoin( const mapgenSlot_t &sourceSlot, const mapgenSlot_t &destSlot );
+	idVec3		TransformVector( const idVec3 &v ) const;
+	idVec3		TransformPoint( const idVec3 &p ) const;
+	idPlane		TransformPlane( const idPlane &plane ) const;
+};
 
 typedef struct mapGenNamePair_s {
 	idStr		oldName;
 	idStr		newName;
 } mapGenNamePair_t;
+
+class mapgenNameRemapper {
+public:
+	void		Build( idMapFile &mapFile, int numEntities, const char *prefix );
+	void		Apply( idDict &epairs ) const;
+
+private:
+	idList<mapGenNamePair_t> namePairs;
+	idList<mapGenNamePair_t> groupPairs;
+
+	const char *FindName( const idList<mapGenNamePair_t> &pairs, const char *oldName ) const;
+	void		RetargetValue( idDict &epairs, const idKeyValue *kv, const idList<mapGenNamePair_t> &pairs ) const;
+	void		RetargetExactKey( idDict &epairs, const char *key ) const;
+};
 
 static bool MapGen_IsNumericString( const char *value ) {
 	char *end;
@@ -86,12 +114,33 @@ static bool MapGen_NormalizePlane( idPlane &plane ) {
 	return true;
 }
 
-static idVec3 MapGen_RotateVector( const idVec3 &v, const mapGenSlot_t &slot ) {
-	return v * slot.rotation;
+void mapgenTransform::SetJoin( const mapgenSlot_t &sourceSlot, const mapgenSlot_t &destSlot ) {
+	idMat3 joinedDestAxis = destSlot.axis;
+
+	sourceCenter = sourceSlot.center;
+	destCenter = destSlot.center;
+	sourceAxis = sourceSlot.axis;
+
+	joinedDestAxis[0] = -joinedDestAxis[0];
+	joinedDestAxis[0].Normalize();
+	joinedDestAxis[1] = joinedDestAxis[2].Cross( joinedDestAxis[0] );
+	joinedDestAxis[1].Normalize();
+	joinedDestAxis[2] = joinedDestAxis[0].Cross( joinedDestAxis[1] );
+	joinedDestAxis[2].Normalize();
+	joinedDestAxis.FixDegeneracies();
+	destAxis = joinedDestAxis;
 }
 
-static idVec3 MapGen_RotatePoint( const idVec3 &p, const mapGenSlot_t &slot ) {
-	return ( p - slot.center ) * slot.rotation + slot.center;
+idVec3 mapgenTransform::TransformVector( const idVec3 &v ) const {
+	idVec3 local;
+	local.x = v * sourceAxis[0];
+	local.y = v * sourceAxis[1];
+	local.z = v * sourceAxis[2];
+	return destAxis[0] * local.x + destAxis[1] * local.y + destAxis[2] * local.z;
+}
+
+idVec3 mapgenTransform::TransformPoint( const idVec3 &p ) const {
+	return TransformVector( p - sourceCenter ) + destCenter;
 }
 
 static idPlane MapGen_LocalPlaneToWorld( const idPlane &localPlane, const idVec3 &origin ) {
@@ -108,13 +157,13 @@ static idPlane MapGen_WorldPlaneToLocal( const idPlane &worldPlane, const idVec3
 	return localPlane;
 }
 
-static idPlane MapGen_RotatePlane( const idPlane &plane, const mapGenSlot_t &slot ) {
+idPlane mapgenTransform::TransformPlane( const idPlane &plane ) const {
 	idPlane normalizedPlane = plane;
 	MapGen_NormalizePlane( normalizedPlane );
 
 	idVec3 point = normalizedPlane.Normal() * normalizedPlane.Dist();
-	idVec3 rotatedPoint = MapGen_RotatePoint( point, slot );
-	idVec3 rotatedNormal = MapGen_RotateVector( normalizedPlane.Normal(), slot );
+	idVec3 rotatedPoint = TransformPoint( point );
+	idVec3 rotatedNormal = TransformVector( normalizedPlane.Normal() );
 
 	idPlane rotatedPlane;
 	rotatedPlane.SetNormal( rotatedNormal );
@@ -170,47 +219,71 @@ static bool MapGen_CalculateBrushCenter( const idPlane planes[6], idVec3 &center
 	return ( numPairs == 3 );
 }
 
-static bool MapGen_CalculateRotationAxis( const idPlane planes[6], int slotSideNum, int oppositeSideNum, idVec3 &rotationAxis ) {
+static bool MapGen_CalculateSlotAxis( const idPlane planes[6], int slotSideNum, int oppositeSideNum, idMat3 &axis ) {
+	idVec3 normal;
 	idVec3 projectedUp;
+	idVec3 bestUp;
 	float bestDot;
-	int bestSideNum;
 
-	projectedUp = idVec3( 0.0f, 0.0f, 1.0f ) - planes[slotSideNum].Normal() * ( planes[slotSideNum].Normal().z );
+	normal = planes[slotSideNum].Normal();
+	if ( normal.Normalize() == 0.0f ) {
+		return false;
+	}
+
+	projectedUp = idVec3( 0.0f, 0.0f, 1.0f ) - normal * ( normal * idVec3( 0.0f, 0.0f, 1.0f ) );
 	if ( projectedUp.Normalize() == 0.0f ) {
-		projectedUp.Zero();
+		projectedUp = idVec3( 1.0f, 0.0f, 0.0f ) - normal * normal.x;
+		if ( projectedUp.Normalize() == 0.0f ) {
+			projectedUp = idVec3( 0.0f, 1.0f, 0.0f ) - normal * normal.y;
+			if ( projectedUp.Normalize() == 0.0f ) {
+				return false;
+			}
+		}
 	}
 
 	bestDot = -1.0f;
-	bestSideNum = -1;
+	bestUp.Zero();
 	for ( int i = 0; i < 6; i++ ) {
 		if ( i == slotSideNum || i == oppositeSideNum ) {
 			continue;
 		}
 
-		idVec3 normal = planes[i].Normal();
-		float dot;
-
-		if ( projectedUp == vec3_zero ) {
-			dot = 1.0f;
-		} else {
-			dot = idMath::Fabs( normal * projectedUp );
+		idVec3 tangent = planes[i].Normal() - normal * ( planes[i].Normal() * normal );
+		if ( tangent.Normalize() == 0.0f ) {
+			continue;
 		}
+
+		float dot = idMath::Fabs( tangent * projectedUp );
 
 		if ( dot > bestDot ) {
 			bestDot = dot;
-			bestSideNum = i;
+			bestUp = tangent;
 		}
 	}
 
-	if ( bestSideNum < 0 ) {
+	if ( bestDot < 0.0f ) {
 		return false;
 	}
 
-	rotationAxis = planes[bestSideNum].Normal();
-	return ( rotationAxis.Normalize() != 0.0f );
+	if ( bestUp * projectedUp < 0.0f ) {
+		bestUp = -bestUp;
+	}
+
+	axis[0] = normal;
+	axis[2] = bestUp;
+	axis[1] = axis[2].Cross( axis[0] );
+	if ( axis[1].Normalize() == 0.0f ) {
+		return false;
+	}
+	axis[2] = axis[0].Cross( axis[1] );
+	if ( axis[2].Normalize() == 0.0f ) {
+		return false;
+	}
+	axis.FixDegeneracies();
+	return true;
 }
 
-static bool MapGen_CalculateSlotTransform( idMapBrush *brush, const idVec3 &origin, int slotSideNum, mapGenSlot_t &slot ) {
+static bool MapGen_CalculateSlotTransform( idMapBrush *brush, const idVec3 &origin, int slotSideNum, mapgenSlot_t &slot ) {
 	idPlane planes[6];
 
 	if ( brush->GetNumSides() != 6 ) {
@@ -233,19 +306,35 @@ static bool MapGen_CalculateSlotTransform( idMapBrush *brush, const idVec3 &orig
 		return false;
 	}
 
-	if ( !MapGen_CalculateRotationAxis( planes, slotSideNum, slot.oppositeSideNum, slot.rotationAxis ) ) {
+	if ( !MapGen_CalculateSlotAxis( planes, slotSideNum, slot.oppositeSideNum, slot.axis ) ) {
 		return false;
 	}
 
 	slot.plane = planes[slotSideNum];
-	slot.rotation = idRotation( slot.center, slot.rotationAxis, 180.0f ).ToMat3();
+	slot.center -= slot.plane.Normal() * slot.plane.Distance( slot.center );
 	return true;
 }
 
-static bool MapGen_FindSlot( const idMapFile &mapFile, mapGenSlot_t &slot ) {
-	for ( int entityNum = 0; entityNum < mapFile.GetNumEntities(); entityNum++ ) {
+static bool MapGen_FindSlot( const idMapFile &mapFile, const char *slotName, mapgenSlot_t &slot, idStr &status ) {
+	int numNamedSlots = 0;
+
+	for ( int entityNum = 1; entityNum < mapFile.GetNumEntities(); entityNum++ ) {
 		idMapEntity *mapEnt = mapFile.GetEntity( entityNum );
+		if ( idStr::Icmp( mapEnt->epairs.GetString( "classname" ), "func_static" ) != 0 ) {
+			continue;
+		}
+		if ( idStr::Icmp( mapEnt->epairs.GetString( "name" ), slotName ) != 0 ) {
+			continue;
+		}
+
+		numNamedSlots++;
+		if ( numNamedSlots > 1 ) {
+			status = va( "found multiple func_static slots named '%s'", slotName );
+			return false;
+		}
+
 		idVec3 origin = MapGen_GetEntityOrigin( mapEnt );
+		int numSlotFaces = 0;
 
 		for ( int primitiveNum = 0; primitiveNum < mapEnt->GetNumPrimitives(); primitiveNum++ ) {
 			idMapPrimitive *mapPrim = mapEnt->GetPrimitive( primitiveNum );
@@ -260,21 +349,38 @@ static bool MapGen_FindSlot( const idMapFile &mapFile, mapGenSlot_t &slot ) {
 					continue;
 				}
 
-				if ( !MapGen_CalculateSlotTransform( brush, origin, sideNum, slot ) ) {
+				numSlotFaces++;
+				if ( numSlotFaces > 1 ) {
+					status = va( "slot '%s' has multiple '%s' faces", slotName, MAPGEN_SLOT_MATERIAL );
 					return false;
 				}
+
+				if ( !MapGen_CalculateSlotTransform( brush, origin, sideNum, slot ) ) {
+					status = va( "slot '%s' must be a six-sided brush with a valid frame", slotName );
+					return false;
+				}
+				slot.name = slotName;
 				slot.entityNum = entityNum;
 				slot.primitiveNum = primitiveNum;
 				slot.sideNum = sideNum;
-				return true;
 			}
+		}
+
+		if ( numSlotFaces == 0 ) {
+			status = va( "slot '%s' has no face using material '%s'", slotName, MAPGEN_SLOT_MATERIAL );
+			return false;
 		}
 	}
 
+	if ( numNamedSlots == 1 ) {
+		return true;
+	}
+
+	status = va( "could not find func_static slot named '%s'", slotName );
 	return false;
 }
 
-static idMapBrushSide *MapGen_CloneBrushSide( idMapBrushSide *srcSide, const mapGenSlot_t &slot, const idVec3 &srcOrigin, const idVec3 &dstOrigin ) {
+static idMapBrushSide *MapGen_CloneBrushSide( idMapBrushSide *srcSide, const mapgenTransform &transform, const idVec3 &srcOrigin, const idVec3 &dstOrigin ) {
 	idMapBrushSide *dstSide = new idMapBrushSide();
 	idVec3 texMat[2];
 
@@ -283,24 +389,24 @@ static idMapBrushSide *MapGen_CloneBrushSide( idMapBrushSide *srcSide, const map
 	dstSide->SetMaterial( srcSide->GetMaterial() );
 
 	idPlane worldPlane = MapGen_LocalPlaneToWorld( srcSide->GetPlane(), srcOrigin );
-	idPlane rotatedWorldPlane = MapGen_RotatePlane( worldPlane, slot );
+	idPlane rotatedWorldPlane = transform.TransformPlane( worldPlane );
 	dstSide->SetPlane( MapGen_WorldPlaneToLocal( rotatedWorldPlane, dstOrigin ) );
 
 	return dstSide;
 }
 
-static idMapBrush *MapGen_CloneBrush( idMapBrush *srcBrush, const mapGenSlot_t &slot, const idVec3 &srcOrigin, const idVec3 &dstOrigin ) {
+static idMapBrush *MapGen_CloneBrush( idMapBrush *srcBrush, const mapgenTransform &transform, const idVec3 &srcOrigin, const idVec3 &dstOrigin ) {
 	idMapBrush *dstBrush = new idMapBrush();
 	dstBrush->epairs = srcBrush->epairs;
 
 	for ( int i = 0; i < srcBrush->GetNumSides(); i++ ) {
-		dstBrush->AddSide( MapGen_CloneBrushSide( srcBrush->GetSide( i ), slot, srcOrigin, dstOrigin ) );
+		dstBrush->AddSide( MapGen_CloneBrushSide( srcBrush->GetSide( i ), transform, srcOrigin, dstOrigin ) );
 	}
 
 	return dstBrush;
 }
 
-static idMapPatch *MapGen_ClonePatch( idMapPatch *srcPatch, const mapGenSlot_t &slot, const idVec3 &srcOrigin, const idVec3 &dstOrigin ) {
+static idMapPatch *MapGen_ClonePatch( idMapPatch *srcPatch, const mapgenTransform &transform, const idVec3 &srcOrigin, const idVec3 &dstOrigin ) {
 	idMapPatch *dstPatch = new idMapPatch( srcPatch->GetWidth(), srcPatch->GetHeight() );
 	dstPatch->epairs = srcPatch->epairs;
 	dstPatch->SetMaterial( srcPatch->GetMaterial() );
@@ -311,142 +417,28 @@ static idMapPatch *MapGen_ClonePatch( idMapPatch *srcPatch, const mapGenSlot_t &
 
 	for ( int i = 0; i < srcPatch->GetWidth() * srcPatch->GetHeight(); i++ ) {
 		idDrawVert vert = ( *srcPatch )[ i ];
-		vert.xyz = MapGen_RotatePoint( vert.xyz + srcOrigin, slot ) - dstOrigin;
-		vert.normal = MapGen_RotateVector( vert.normal, slot );
-		vert.tangents[0] = MapGen_RotateVector( vert.tangents[0], slot );
-		vert.tangents[1] = MapGen_RotateVector( vert.tangents[1], slot );
+		vert.xyz = transform.TransformPoint( vert.xyz + srcOrigin ) - dstOrigin;
+		vert.normal = transform.TransformVector( vert.normal );
+		vert.tangents[0] = transform.TransformVector( vert.tangents[0] );
+		vert.tangents[1] = transform.TransformVector( vert.tangents[1] );
 		( *dstPatch )[ i ] = vert;
 	}
 
 	return dstPatch;
 }
 
-static idMapPrimitive *MapGen_ClonePrimitive( idMapPrimitive *srcPrim, const mapGenSlot_t &slot, const idVec3 &srcOrigin, const idVec3 &dstOrigin ) {
+static idMapPrimitive *MapGen_ClonePrimitive( idMapPrimitive *srcPrim, const mapgenTransform &transform, const idVec3 &srcOrigin, const idVec3 &dstOrigin ) {
 	switch ( srcPrim->GetType() ) {
 		case idMapPrimitive::TYPE_BRUSH:
-			return MapGen_CloneBrush( static_cast<idMapBrush *>( srcPrim ), slot, srcOrigin, dstOrigin );
+			return MapGen_CloneBrush( static_cast<idMapBrush *>( srcPrim ), transform, srcOrigin, dstOrigin );
 		case idMapPrimitive::TYPE_PATCH:
-			return MapGen_ClonePatch( static_cast<idMapPatch *>( srcPrim ), slot, srcOrigin, dstOrigin );
+			return MapGen_ClonePatch( static_cast<idMapPatch *>( srcPrim ), transform, srcOrigin, dstOrigin );
 		default:
 			return NULL;
 	}
 }
 
-static bool MapGen_NameIsUsed( idMapFile &mapFile, const idList<idStr> &usedNames, const char *name ) {
-	if ( name == NULL || name[0] == '\0' ) {
-		return true;
-	}
-
-	if ( mapFile.FindEntity( name ) != NULL ) {
-		return true;
-	}
-
-	for ( int i = 0; i < usedNames.Num(); i++ ) {
-		if ( usedNames[i].Icmp( name ) == 0 ) {
-			return true;
-		}
-	}
-
-	return false;
-}
-
-static idStr MapGen_UniqueMirrorName( idMapFile &mapFile, const idList<idStr> &usedNames, const char *oldName ) {
-	idStr baseName = oldName;
-	baseName += "_mapgen_mirror";
-
-	idStr newName = baseName;
-	for ( int i = 1; MapGen_NameIsUsed( mapFile, usedNames, newName.c_str() ); i++ ) {
-		newName = va( "%s%d", baseName.c_str(), i );
-	}
-
-	return newName;
-}
-
-static const char *MapGen_FindMirroredName( const idList<mapGenNamePair_t> &namePairs, const char *oldName ) {
-	for ( int i = 0; i < namePairs.Num(); i++ ) {
-		if ( namePairs[i].oldName.Icmp( oldName ) == 0 ) {
-			return namePairs[i].newName.c_str();
-		}
-	}
-	return NULL;
-}
-
-static bool MapGen_PairExists( const idList<mapGenNamePair_t> &pairs, const char *oldName ) {
-	return ( MapGen_FindMirroredName( pairs, oldName ) != NULL );
-}
-
-static void MapGen_BuildNamePairs( idMapFile &mapFile, idList<mapGenNamePair_t> &namePairs ) {
-	idList<idStr> usedNames;
-
-	for ( int i = 1; i < mapFile.GetNumEntities(); i++ ) {
-		const char *oldName = mapFile.GetEntity( i )->epairs.GetString( "name" );
-		if ( oldName[0] == '\0' ) {
-			continue;
-		}
-
-		mapGenNamePair_t pair;
-		pair.oldName = oldName;
-		pair.newName = MapGen_UniqueMirrorName( mapFile, usedNames, oldName );
-		usedNames.Append( pair.newName );
-		namePairs.Append( pair );
-	}
-}
-
-static bool MapGen_GroupNameIsUsed( idMapFile &mapFile, const idList<idStr> &usedNames, const char *name ) {
-	if ( name == NULL || name[0] == '\0' ) {
-		return true;
-	}
-
-	for ( int i = 1; i < mapFile.GetNumEntities(); i++ ) {
-		const idKeyValue *kv = mapFile.GetEntity( i )->epairs.FindKey( "team" );
-		if ( kv != NULL && kv->GetValue().Icmp( name ) == 0 ) {
-			return true;
-		}
-	}
-
-	for ( int i = 0; i < usedNames.Num(); i++ ) {
-		if ( usedNames[i].Icmp( name ) == 0 ) {
-			return true;
-		}
-	}
-
-	return false;
-}
-
-static idStr MapGen_UniqueMirrorGroupName( idMapFile &mapFile, const idList<idStr> &usedNames, const char *oldName ) {
-	idStr baseName = oldName;
-	baseName += "_mapgen_mirror";
-
-	idStr newName = baseName;
-	for ( int i = 1; MapGen_GroupNameIsUsed( mapFile, usedNames, newName.c_str() ); i++ ) {
-		newName = va( "%s%d", baseName.c_str(), i );
-	}
-
-	return newName;
-}
-
-static void MapGen_BuildGroupPairs( idMapFile &mapFile, idList<mapGenNamePair_t> &groupPairs ) {
-	idList<idStr> usedNames;
-
-	for ( int i = 1; i < mapFile.GetNumEntities(); i++ ) {
-		const idKeyValue *kv = mapFile.GetEntity( i )->epairs.FindKey( "team" );
-		if ( kv == NULL || kv->GetValue()[0] == '\0' || MapGen_IsNumericString( kv->GetValue() ) ) {
-			continue;
-		}
-
-		if ( MapGen_PairExists( groupPairs, kv->GetValue() ) ) {
-			continue;
-		}
-
-		mapGenNamePair_t pair;
-		pair.oldName = kv->GetValue();
-		pair.newName = MapGen_UniqueMirrorGroupName( mapFile, usedNames, kv->GetValue() );
-		usedNames.Append( pair.newName );
-		groupPairs.Append( pair );
-	}
-}
-
-static void MapGen_RotateMatrixKey( idDict &epairs, const char *key, const mapGenSlot_t &slot ) {
+static void MapGen_RotateMatrixKey( idDict &epairs, const char *key, const mapgenTransform &transform ) {
 	idMat3 axis;
 
 	if ( !epairs.GetMatrix( key, NULL, axis ) ) {
@@ -454,29 +446,29 @@ static void MapGen_RotateMatrixKey( idDict &epairs, const char *key, const mapGe
 	}
 
 	for ( int i = 0; i < 3; i++ ) {
-		axis[i] = MapGen_RotateVector( axis[i], slot );
+		axis[i] = transform.TransformVector( axis[i] );
 		axis[i].FixDegenerateNormal();
 	}
 	epairs.SetMatrix( key, axis );
 }
 
-static void MapGen_RotateVectorKey( idDict &epairs, const char *key, const mapGenSlot_t &slot ) {
+static void MapGen_RotateVectorKey( idDict &epairs, const char *key, const mapgenTransform &transform ) {
 	idVec3 value;
 
 	if ( epairs.GetVector( key, NULL, value ) ) {
-		epairs.SetVector( key, MapGen_RotateVector( value, slot ) );
+		epairs.SetVector( key, transform.TransformVector( value ) );
 	}
 }
 
-static void MapGen_RotatePointKey( idDict &epairs, const char *key, const mapGenSlot_t &slot ) {
+static void MapGen_RotatePointKey( idDict &epairs, const char *key, const mapgenTransform &transform ) {
 	idVec3 value;
 
 	if ( epairs.GetVector( key, NULL, value ) ) {
-		epairs.SetVector( key, MapGen_RotatePoint( value, slot ) );
+		epairs.SetVector( key, transform.TransformPoint( value ) );
 	}
 }
 
-static void MapGen_RotateAngleKey( idDict &epairs, const char *key, const mapGenSlot_t &slot ) {
+static void MapGen_RotateAngleKey( idDict &epairs, const char *key, const mapgenTransform &transform ) {
 	const idKeyValue *kv = epairs.FindKey( key );
 
 	if ( kv == NULL ) {
@@ -485,11 +477,11 @@ static void MapGen_RotateAngleKey( idDict &epairs, const char *key, const mapGen
 
 	float yaw = atof( kv->GetValue() );
 	idAngles angles( 0.0f, yaw, 0.0f );
-	idVec3 forward = MapGen_RotateVector( angles.ToForward(), slot );
+	idVec3 forward = transform.TransformVector( angles.ToForward() );
 	epairs.SetFloat( key, idMath::AngleNormalize360( forward.ToYaw() ) );
 }
 
-static void MapGen_RotateMoveDirKey( idDict &epairs, const char *key, const mapGenSlot_t &slot ) {
+static void MapGen_RotateMoveDirKey( idDict &epairs, const char *key, const mapgenTransform &transform ) {
 	const idKeyValue *kv = epairs.FindKey( key );
 
 	if ( kv == NULL ) {
@@ -506,7 +498,7 @@ static void MapGen_RotateMoveDirKey( idDict &epairs, const char *key, const mapG
 		direction = idAngles( 0.0f, yaw, 0.0f ).ToForward();
 	}
 
-	direction = MapGen_RotateVector( direction, slot );
+	direction = transform.TransformVector( direction );
 	direction.Normalize();
 	direction.FixDegenerateNormal();
 
@@ -523,74 +515,113 @@ static bool MapGen_KeyHasPrefix( const idKeyValue *kv, const char *prefix ) {
 	return ( kv != NULL && kv->GetKey().Icmpn( prefix, idStr::Length( prefix ) ) == 0 );
 }
 
-static void MapGen_RetargetValue( idDict &epairs, const idKeyValue *kv, const idList<mapGenNamePair_t> &namePairs ) {
-	const char *newName = MapGen_FindMirroredName( namePairs, kv->GetValue() );
+const char *mapgenNameRemapper::FindName( const idList<mapGenNamePair_t> &pairs, const char *oldName ) const {
+	for ( int i = 0; i < pairs.Num(); i++ ) {
+		if ( pairs[i].oldName.Icmp( oldName ) == 0 ) {
+			return pairs[i].newName.c_str();
+		}
+	}
+	return NULL;
+}
+
+void mapgenNameRemapper::RetargetValue( idDict &epairs, const idKeyValue *kv, const idList<mapGenNamePair_t> &pairs ) const {
+	const char *newName = FindName( pairs, kv->GetValue() );
 	if ( newName != NULL ) {
 		epairs.Set( kv->GetKey(), newName );
 	}
 }
 
-static void MapGen_RetargetExactKey( idDict &epairs, const char *key, const idList<mapGenNamePair_t> &namePairs ) {
+void mapgenNameRemapper::RetargetExactKey( idDict &epairs, const char *key ) const {
 	const idKeyValue *kv = epairs.FindKey( key );
 	if ( kv != NULL ) {
-		MapGen_RetargetValue( epairs, kv, namePairs );
+		RetargetValue( epairs, kv, namePairs );
 	}
 }
 
-static void MapGen_RetargetNames( idDict &epairs, const idList<mapGenNamePair_t> &namePairs ) {
-	int numKeyVals = epairs.GetNumKeyVals();
+void mapgenNameRemapper::Build( idMapFile &mapFile, int numEntities, const char *prefix ) {
+	namePairs.Clear();
+	groupPairs.Clear();
 
+	for ( int i = 1; i < numEntities; i++ ) {
+		const char *oldName = mapFile.GetEntity( i )->epairs.GetString( "name" );
+		if ( oldName[0] != '\0' ) {
+			mapGenNamePair_t pair;
+			pair.oldName = oldName;
+			pair.newName = prefix;
+			pair.newName += oldName;
+			namePairs.Append( pair );
+		}
+
+		const idKeyValue *kv = mapFile.GetEntity( i )->epairs.FindKey( "team" );
+		if ( kv == NULL || kv->GetValue()[0] == '\0' || MapGen_IsNumericString( kv->GetValue() ) ) {
+			continue;
+		}
+
+		if ( FindName( groupPairs, kv->GetValue() ) != NULL ) {
+			continue;
+		}
+
+		mapGenNamePair_t pair;
+		pair.oldName = kv->GetValue();
+		pair.newName = prefix;
+		pair.newName += kv->GetValue();
+		groupPairs.Append( pair );
+	}
+}
+
+void mapgenNameRemapper::Apply( idDict &epairs ) const {
+	const char *oldName = epairs.GetString( "name" );
+	const char *newName = FindName( namePairs, oldName );
+	if ( newName != NULL ) {
+		epairs.Set( "name", newName );
+	}
+
+	int numKeyVals = epairs.GetNumKeyVals();
 	for ( int i = 0; i < numKeyVals; i++ ) {
 		const idKeyValue *kv = epairs.GetKeyVal( i );
 		if ( !MapGen_KeyHasPrefix( kv, "target" ) && !MapGen_KeyHasPrefix( kv, "guiTarget" ) && !MapGen_KeyHasPrefix( kv, "buddy" ) ) {
 			continue;
 		}
-
-		MapGen_RetargetValue( epairs, kv, namePairs );
+		RetargetValue( epairs, kv, namePairs );
 	}
 
-	MapGen_RetargetExactKey( epairs, "bind", namePairs );
-	MapGen_RetargetExactKey( epairs, "cameraTarget", namePairs );
-	MapGen_RetargetExactKey( epairs, "syncLock", namePairs );
-}
+	RetargetExactKey( epairs, "bind" );
+	RetargetExactKey( epairs, "cameraTarget" );
+	RetargetExactKey( epairs, "syncLock" );
 
-static void MapGen_RetargetGroups( idDict &epairs, const idList<mapGenNamePair_t> &groupPairs ) {
-	const idKeyValue *kv = epairs.FindKey( "team" );
-	if ( kv != NULL ) {
-		MapGen_RetargetValue( epairs, kv, groupPairs );
+	const idKeyValue *team = epairs.FindKey( "team" );
+	if ( team != NULL ) {
+		RetargetValue( epairs, team, groupPairs );
 	}
 }
 
-static idMapEntity *MapGen_CloneEntity( idMapEntity *srcEnt, const mapGenSlot_t &slot, const idList<mapGenNamePair_t> &namePairs, const idList<mapGenNamePair_t> &groupPairs ) {
+static void MapGen_TransformEntitySpawnArgs( idDict &epairs, const mapgenTransform &transform ) {
+	MapGen_RotatePointKey( epairs, "light_origin", transform );
+	MapGen_RotateVectorKey( epairs, "light_target", transform );
+	MapGen_RotateVectorKey( epairs, "light_right", transform );
+	MapGen_RotateVectorKey( epairs, "light_up", transform );
+	MapGen_RotateVectorKey( epairs, "light_start", transform );
+	MapGen_RotateVectorKey( epairs, "light_end", transform );
+	MapGen_RotateVectorKey( epairs, "light_center", transform );
+	MapGen_RotateMatrixKey( epairs, "rotation", transform );
+	MapGen_RotateMatrixKey( epairs, "light_rotation", transform );
+	MapGen_RotateAngleKey( epairs, "angle", transform );
+	MapGen_RotateMoveDirKey( epairs, "movedir", transform );
+}
+
+static idMapEntity *MapGen_CloneEntity( idMapEntity *srcEnt, const mapgenTransform &transform, const mapgenNameRemapper &remapper ) {
 	idVec3 srcOrigin = MapGen_GetEntityOrigin( srcEnt );
-	idVec3 dstOrigin = MapGen_RotatePoint( srcOrigin, slot );
+	idVec3 dstOrigin = transform.TransformPoint( srcOrigin );
 
 	idMapEntity *dstEnt = new idMapEntity();
 	dstEnt->epairs = srcEnt->epairs;
 	dstEnt->epairs.SetVector( "origin", dstOrigin );
 
-	const char *oldName = srcEnt->epairs.GetString( "name" );
-	const char *newName = MapGen_FindMirroredName( namePairs, oldName );
-	if ( newName != NULL ) {
-		dstEnt->epairs.Set( "name", newName );
-	}
-
-	MapGen_RetargetNames( dstEnt->epairs, namePairs );
-	MapGen_RetargetGroups( dstEnt->epairs, groupPairs );
-	MapGen_RotatePointKey( dstEnt->epairs, "light_origin", slot );
-	MapGen_RotateVectorKey( dstEnt->epairs, "light_target", slot );
-	MapGen_RotateVectorKey( dstEnt->epairs, "light_right", slot );
-	MapGen_RotateVectorKey( dstEnt->epairs, "light_up", slot );
-	MapGen_RotateVectorKey( dstEnt->epairs, "light_start", slot );
-	MapGen_RotateVectorKey( dstEnt->epairs, "light_end", slot );
-	MapGen_RotateVectorKey( dstEnt->epairs, "light_center", slot );
-	MapGen_RotateMatrixKey( dstEnt->epairs, "rotation", slot );
-	MapGen_RotateMatrixKey( dstEnt->epairs, "light_rotation", slot );
-	MapGen_RotateAngleKey( dstEnt->epairs, "angle", slot );
-	MapGen_RotateMoveDirKey( dstEnt->epairs, "movedir", slot );
+	remapper.Apply( dstEnt->epairs );
+	MapGen_TransformEntitySpawnArgs( dstEnt->epairs, transform );
 
 	for ( int i = 0; i < srcEnt->GetNumPrimitives(); i++ ) {
-		idMapPrimitive *dstPrim = MapGen_ClonePrimitive( srcEnt->GetPrimitive( i ), slot, srcOrigin, dstOrigin );
+		idMapPrimitive *dstPrim = MapGen_ClonePrimitive( srcEnt->GetPrimitive( i ), transform, srcOrigin, dstOrigin );
 		if ( dstPrim != NULL ) {
 			dstEnt->AddPrimitive( dstPrim );
 		}
@@ -599,12 +630,12 @@ static idMapEntity *MapGen_CloneEntity( idMapEntity *srcEnt, const mapGenSlot_t 
 	return dstEnt;
 }
 
-static bool MapGen_DuplicateWorldspawn( idMapEntity *worldspawn, const mapGenSlot_t &slot ) {
+static bool MapGen_DuplicateWorldspawn( idMapEntity *worldspawn, const mapgenTransform &transform ) {
 	idVec3 origin = MapGen_GetEntityOrigin( worldspawn );
 	int numPrimitives = worldspawn->GetNumPrimitives();
 
 	for ( int i = 0; i < numPrimitives; i++ ) {
-		idMapPrimitive *dstPrim = MapGen_ClonePrimitive( worldspawn->GetPrimitive( i ), slot, origin, origin );
+		idMapPrimitive *dstPrim = MapGen_ClonePrimitive( worldspawn->GetPrimitive( i ), transform, origin, origin );
 		if ( dstPrim == NULL ) {
 			return false;
 		}
@@ -629,27 +660,33 @@ bool MapGen_DMap( const char *sourceMapName, idStr &outputMapName, idStr &status
 		return false;
 	}
 
-	mapGenSlot_t slot;
-	if ( !MapGen_FindSlot( mapFile, slot ) ) {
-		status = va( "could not find brush side using material '%s'", MAPGEN_SLOT_MATERIAL );
-		return false;
-	}
-
-	idList<mapGenNamePair_t> namePairs;
-	MapGen_BuildNamePairs( mapFile, namePairs );
-
-	idList<mapGenNamePair_t> groupPairs;
-	MapGen_BuildGroupPairs( mapFile, groupPairs );
-
-	idMapEntity *worldspawn = mapFile.GetEntity( 0 );
-	if ( !MapGen_DuplicateWorldspawn( worldspawn, slot ) ) {
-		status = "could not duplicate worldspawn primitives";
+	mapgenSlot_t slot;
+	if ( !MapGen_FindSlot( mapFile, MAPGEN_HARDCODED_SLOT_NAME, slot, status ) ) {
 		return false;
 	}
 
 	int numEntities = mapFile.GetNumEntities();
+	mapgenNameRemapper firstInstanceNames;
+	firstInstanceNames.Build( mapFile, numEntities, "m0__" );
+
+	mapgenNameRemapper secondInstanceNames;
+	secondInstanceNames.Build( mapFile, numEntities, "m1__" );
+
+	mapgenTransform secondInstanceTransform;
+	secondInstanceTransform.SetJoin( slot, slot );
+
+	idMapEntity *worldspawn = mapFile.GetEntity( 0 );
+	if ( !MapGen_DuplicateWorldspawn( worldspawn, secondInstanceTransform ) ) {
+		status = "could not duplicate worldspawn primitives";
+		return false;
+	}
+
 	for ( int i = 1; i < numEntities; i++ ) {
-		mapFile.AddEntity( MapGen_CloneEntity( mapFile.GetEntity( i ), slot, namePairs, groupPairs ) );
+		mapFile.AddEntity( MapGen_CloneEntity( mapFile.GetEntity( i ), secondInstanceTransform, secondInstanceNames ) );
+	}
+
+	for ( int i = 1; i < numEntities; i++ ) {
+		firstInstanceNames.Apply( mapFile.GetEntity( i )->epairs );
 	}
 
 	idStr outputMapBase = MAPGEN_OUTPUT_MAP;
@@ -661,6 +698,6 @@ bool MapGen_DMap( const char *sourceMapName, idStr &outputMapName, idStr &status
 		return false;
 	}
 
-	status = va( "using slot entity %d primitive %d side %d opposite %d", slot.entityNum, slot.primitiveNum, slot.sideNum, slot.oppositeSideNum );
+	status = va( "joined %s as m0__%s to m1__%s using entity %d primitive %d side %d opposite %d", MAPGEN_HARDCODED_SLOT_NAME, MAPGEN_HARDCODED_SLOT_NAME, MAPGEN_HARDCODED_SLOT_NAME, slot.entityNum, slot.primitiveNum, slot.sideNum, slot.oppositeSideNum );
 	return true;
 }

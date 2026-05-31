@@ -398,11 +398,17 @@ static const char *MAPGEN_SMOKE_MAP =
 	"// entity 0\n"
 	"{\n"
 	"\"classname\" \"worldspawn\"\n"
+	"}\n"
+	"// entity 1\n"
+	"{\n"
+	"\"classname\" \"func_static\"\n"
+	"\"name\" \"slot_0\"\n"
+	"\"origin\" \"0 0 0\"\n"
 	"{\n"
 	" brushDef3\n"
 	" {\n"
 	"  ( 1 0 0 0 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/mapgen_slot\" 0 0 0\n"
-	"  ( -1 0 0 -128 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
+	"  ( -1 0 0 -16 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
 	"  ( 0 1 0 -64 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
 	"  ( 0 -1 0 -64 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
 	"  ( 0 0 1 -64 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
@@ -410,7 +416,7 @@ static const char *MAPGEN_SMOKE_MAP =
 	" }\n"
 	"}\n"
 	"}\n"
-	"// entity 1\n"
+	"// entity 2\n"
 	"{\n"
 	"\"classname\" \"info_null\"\n"
 	"\"name\" \"marker\"\n"
@@ -421,8 +427,40 @@ static const char *MAPGEN_SMOKE_MAP =
 	"\"cameraTarget\" \"marker\"\n"
 	"\"bind\" \"marker\"\n"
 	"\"team\" \"door_team\"\n"
+	"\"angle\" \"90\"\n"
 	"\"movedir\" \"0\"\n"
 	"\"origin\" \"64 0 0\"\n"
+	"}\n";
+
+static const char *MAPGEN_HORIZONTAL_SLOT_MAP =
+	"Version 2\n"
+	"// entity 0\n"
+	"{\n"
+	"\"classname\" \"worldspawn\"\n"
+	"}\n"
+	"// entity 1\n"
+	"{\n"
+	"\"classname\" \"func_static\"\n"
+	"\"name\" \"slot_0\"\n"
+	"\"origin\" \"0 0 0\"\n"
+	"{\n"
+	" brushDef3\n"
+	" {\n"
+	"  ( 0 0 1 0 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/mapgen_slot\" 0 0 0\n"
+	"  ( 0 0 -1 -16 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
+	"  ( 1 0 0 -64 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
+	"  ( -1 0 0 -64 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
+	"  ( 0 1 0 -64 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
+	"  ( 0 -1 0 -64 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
+	" }\n"
+	"}\n"
+	"}\n"
+	"// entity 2\n"
+	"{\n"
+	"\"classname\" \"info_null\"\n"
+	"\"name\" \"marker\"\n"
+	"\"movedir\" \"-1\"\n"
+	"\"origin\" \"0 0 64\"\n"
 	"}\n";
 
 static void RunMapGenSmokeTest( TestFileSystem &testFileSystem ) {
@@ -436,10 +474,19 @@ static void RunMapGenSmokeTest( TestFileSystem &testFileSystem ) {
 
 	idMapFile generatedMap;
 	Expect( generatedMap.Parse( "maps/mapgen/current", true ), "generated map could not be parsed" );
-	Expect( generatedMap.GetNumEntities() == 3, "expected original and rotated entity" );
-	Expect( generatedMap.GetEntity( 0 )->GetNumPrimitives() == 2, "expected worldspawn primitive to be duplicated" );
+	Expect( generatedMap.GetNumEntities() == 5, "expected two prefixed map instances" );
 
-	idMapBrush *rotatedSlotBrush = static_cast<idMapBrush *>( generatedMap.GetEntity( 0 )->GetPrimitive( 1 ) );
+	idMapEntity *firstSlot = generatedMap.GetEntity( 1 );
+	idMapEntity *firstMarker = generatedMap.GetEntity( 2 );
+	idMapEntity *secondSlot = generatedMap.GetEntity( 3 );
+	idMapEntity *secondMarker = generatedMap.GetEntity( 4 );
+
+	ExpectString( firstSlot->epairs.GetString( "name" ), "m0__slot_0", "unexpected first slot name" );
+	ExpectString( firstMarker->epairs.GetString( "name" ), "m0__marker", "unexpected first marker name" );
+	ExpectString( secondSlot->epairs.GetString( "name" ), "m1__slot_0", "unexpected second slot name" );
+	ExpectString( secondMarker->epairs.GetString( "name" ), "m1__marker", "unexpected second marker name" );
+
+	idMapBrush *rotatedSlotBrush = static_cast<idMapBrush *>( secondSlot->GetPrimitive( 0 ) );
 	bool foundRotatedSlotSide = false;
 	for ( int i = 0; i < rotatedSlotBrush->GetNumSides(); i++ ) {
 		idMapBrushSide *side = rotatedSlotBrush->GetSide( i );
@@ -448,29 +495,70 @@ static void RunMapGenSmokeTest( TestFileSystem &testFileSystem ) {
 		}
 		foundRotatedSlotSide = true;
 		ExpectNear( side->GetPlane().Normal().x, -1.0f, 0.01f, "rotated slot normal x" );
-		ExpectNear( side->GetPlane().Dist(), 128.0f, 0.01f, "rotated slot plane distance" );
+		ExpectNear( side->GetPlane().Dist(), 0.0f, 0.01f, "rotated slot plane distance" );
 	}
 	Expect( foundRotatedSlotSide, "rotated slot brush has no mapgen slot side" );
 
-	idMapEntity *rotated = generatedMap.GetEntity( 2 );
-	ExpectString( rotated->epairs.GetString( "name" ), "marker_mapgen_mirror", "unexpected rotated name" );
-	ExpectString( rotated->epairs.GetString( "target" ), "marker_mapgen_mirror", "unexpected rotated target" );
-	ExpectString( rotated->epairs.GetString( "guiTarget" ), "marker_mapgen_mirror", "unexpected rotated guiTarget" );
-	ExpectString( rotated->epairs.GetString( "buddy" ), "marker_mapgen_mirror", "unexpected rotated buddy" );
-	ExpectString( rotated->epairs.GetString( "syncLock" ), "marker_mapgen_mirror", "unexpected rotated syncLock" );
-	ExpectString( rotated->epairs.GetString( "cameraTarget" ), "marker_mapgen_mirror", "unexpected rotated cameraTarget" );
-	ExpectString( rotated->epairs.GetString( "bind" ), "marker_mapgen_mirror", "unexpected rotated bind" );
-	ExpectString( rotated->epairs.GetString( "team" ), "door_team_mapgen_mirror", "unexpected rotated team" );
+	ExpectString( firstMarker->epairs.GetString( "target" ), "m0__marker", "unexpected first target" );
+	ExpectString( firstMarker->epairs.GetString( "team" ), "m0__door_team", "unexpected first team" );
+
+	ExpectString( secondMarker->epairs.GetString( "target" ), "m1__marker", "unexpected second target" );
+	ExpectString( secondMarker->epairs.GetString( "guiTarget" ), "m1__marker", "unexpected second guiTarget" );
+	ExpectString( secondMarker->epairs.GetString( "buddy" ), "m1__marker", "unexpected second buddy" );
+	ExpectString( secondMarker->epairs.GetString( "syncLock" ), "m1__marker", "unexpected second syncLock" );
+	ExpectString( secondMarker->epairs.GetString( "cameraTarget" ), "m1__marker", "unexpected second cameraTarget" );
+	ExpectString( secondMarker->epairs.GetString( "bind" ), "m1__marker", "unexpected second bind" );
+	ExpectString( secondMarker->epairs.GetString( "team" ), "m1__door_team", "unexpected second team" );
 
 	float movedir;
-	Expect( rotated->epairs.GetFloat( "movedir", "0", movedir ), "rotated movedir is missing" );
+	Expect( secondMarker->epairs.GetFloat( "movedir", "0", movedir ), "rotated movedir is missing" );
 	ExpectNear( movedir, 180.0f, 0.01f, "rotated movedir" );
 
+	float angle;
+	Expect( secondMarker->epairs.GetFloat( "angle", "0", angle ), "rotated angle is missing" );
+	ExpectNear( angle, 270.0f, 0.01f, "rotated angle" );
+
 	idVec3 rotatedOrigin;
-	rotated->epairs.GetVector( "origin", "0 0 0", rotatedOrigin );
-	ExpectNear( rotatedOrigin.x, -192.0f, 0.01f, "rotated origin x" );
+	secondMarker->epairs.GetVector( "origin", "0 0 0", rotatedOrigin );
+	ExpectNear( rotatedOrigin.x, -64.0f, 0.01f, "rotated origin x" );
 	ExpectNear( rotatedOrigin.y, 0.0f, 0.01f, "rotated origin y" );
 	ExpectNear( rotatedOrigin.z, 0.0f, 0.01f, "rotated origin z" );
+}
+
+static void RunMapGenHorizontalSlotTest( TestFileSystem &testFileSystem ) {
+	testFileSystem.AddFile( "maps/mapgen_horizontal.map", MAPGEN_HORIZONTAL_SLOT_MAP );
+
+	idStr outputMapName;
+	idStr status;
+	Expect( MapGen_DMap( "mapgen_horizontal", outputMapName, status ), status.c_str() );
+
+	idMapFile generatedMap;
+	Expect( generatedMap.Parse( "maps/mapgen/current", true ), "horizontal generated map could not be parsed" );
+	Expect( generatedMap.GetNumEntities() == 5, "expected two horizontal map instances" );
+
+	idMapEntity *secondSlot = generatedMap.GetEntity( 3 );
+	idMapBrush *rotatedSlotBrush = static_cast<idMapBrush *>( secondSlot->GetPrimitive( 0 ) );
+	bool foundRotatedSlotSide = false;
+	for ( int i = 0; i < rotatedSlotBrush->GetNumSides(); i++ ) {
+		idMapBrushSide *side = rotatedSlotBrush->GetSide( i );
+		if ( idStr::Icmp( side->GetMaterial(), "textures/common/mapgen_slot" ) != 0 ) {
+			continue;
+		}
+		foundRotatedSlotSide = true;
+		ExpectNear( side->GetPlane().Normal().z, -1.0f, 0.01f, "horizontal rotated slot normal z" );
+		ExpectNear( side->GetPlane().Dist(), 0.0f, 0.01f, "horizontal rotated slot plane distance" );
+	}
+	Expect( foundRotatedSlotSide, "horizontal rotated slot brush has no mapgen slot side" );
+
+	idMapEntity *secondMarker = generatedMap.GetEntity( 4 );
+	ExpectString( secondMarker->epairs.GetString( "name" ), "m1__marker", "unexpected horizontal second marker name" );
+	ExpectString( secondMarker->epairs.GetString( "movedir" ), "-2", "unexpected horizontal movedir" );
+
+	idVec3 rotatedOrigin;
+	secondMarker->epairs.GetVector( "origin", "0 0 0", rotatedOrigin );
+	ExpectNear( rotatedOrigin.x, 0.0f, 0.01f, "horizontal rotated origin x" );
+	ExpectNear( rotatedOrigin.y, 0.0f, 0.01f, "horizontal rotated origin y" );
+	ExpectNear( rotatedOrigin.z, -64.0f, 0.01f, "horizontal rotated origin z" );
 }
 
 int main( int argc, char **argv ) {
@@ -487,6 +575,7 @@ int main( int argc, char **argv ) {
 		idLib::Init();
 		idLibInitialized = true;
 		RunMapGenSmokeTest( testFileSystem );
+		RunMapGenHorizontalSlotTest( testFileSystem );
 	} catch ( const std::exception &ex ) {
 		if ( idLibInitialized ) {
 			idLib::ShutDown();

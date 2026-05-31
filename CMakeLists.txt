@@ -9,6 +9,8 @@ option(D3XP		"Build the d3xp/ game code" ON)
 set(D3XP_NAME	"d3xp" CACHE STRING "Name of the mod built from d3xp/ (will result in \${D3XP_NAME}.dll)")
 set(D3XP_DEFS	"GAME_DLL;_D3XP;CTF" CACHE STRING "Compiler definitions for the mod built from d3xp/")
 
+option(BUILD_TESTING "Build test executables" OFF)
+
 option(ONATIVE	"Optimize for the host CPU" OFF)
 
 if(NOT MSVC) # GCC/clang or compatible, hopefully
@@ -424,6 +426,7 @@ set(src_game
 	game/gamesys/SysCmds.cpp
 	game/gamesys/SysCvar.cpp
 	game/gamesys/TypeInfo.cpp
+	game/mapgen/MapGen.cpp
 	game/anim/Anim.cpp
 	game/anim/Anim_Blend.cpp
 	game/anim/Anim_Import.cpp
@@ -614,6 +617,19 @@ else()
 endif()
 
 source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} PREFIX neo FILES ${src_idlib})
+
+if(BUILD_TESTING)
+	enable_testing()
+
+	add_executable(mapgen_test
+		tests/mapgen_test.cpp
+		game/mapgen/MapGen.cpp
+	)
+	set_target_properties(mapgen_test PROPERTIES COMPILE_DEFINITIONS "${BASE_DEFS}")
+	target_include_directories(mapgen_test PRIVATE "${CMAKE_SOURCE_DIR}/game")
+	target_link_libraries(mapgen_test idlib)
+	add_test(NAME mapgen_test COMMAND mapgen_test)
+endif()
 
 if(BASE)
 	if (AROS)

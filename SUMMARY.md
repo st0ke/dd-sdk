@@ -261,3 +261,99 @@ The generated library should be placed next to dhewm3's game libraries and loade
 - Start with `game/Entity.*`, `Actor.*`, `Player.*`, and `Weapon.*` for gameplay behavior.
 - Start with `game/gamesys/SysCmds.cpp` and `game/gamesys/SysCvar.*` for console commands and CVars.
 - Mirror relevant changes into `d3xp/` when the expansion module should keep parity.
+
+## `game/` Deep Dive Starting From `idGameLocal`
+
+`game/` is the vanilla Doom 3 gameplay module. It builds into the `base` game library, and `idGameLocal` is the best starting point because it owns the game state and implements the engine-facing `idGame` API.
+
+### `idGameLocal`
+
+`idGameLocal` is declared in `game/Game_local.h`. It inherits from `idGame`, which is the interface dhewm3 calls into. A global singleton is created in `game/Game_local.cpp`: `gameLocal`, and the exported `idGame *game` points at it.
+
+The DLL entry point is `GetGameAPI()` in `game/Game_local.cpp`. It receives engine services like `renderSystem`, `soundSystem`, `fileSystem`, `declManager`, `collisionModelManager`, and others, stores them globally, wires them into `idLib`, then returns `gameExport` with `game` and `gameEdit`.
+
+Think of `idGameLocal` as the coordinator for:
+
+- Server/game settings: `serverInfo`, `userInfo`, `persistentPlayerInfo`
+- Entity storage: `entities`, `spawnIds`, `spawnedEntities`, `activeEntities`
+- Per-map systems: `clip`, `push`, `pvs`, `aasList`, `mapFile`
+- Script runtime: `program`, `frameCommandThread`
+- Multiplayer: `mpGame`, snapshots, client PVS, network event queues
+- Rendering/audio handles: global `gameRenderWorld` and `gameSoundWorld`
+- Timing: `framenum`, `time`, `previousTime`, `msec`
+
+Those fields are grouped in `game/Game_local.h`.
+
+### Startup
+
+`idGameLocal::Init()` is the one-time game-module startup path in `game/Game_local.cpp`. It initializes `idLib`, static CVars, SIMD, game decl types/folders, events/classes, console commands, default scripts, smoke particles, and AAS types.
+
+The important startup chain is:
+
+1. `GetGameAPI()` imports engine services.
+2. `Init()` initializes game-side systems.
+3. `program.Startup(SCRIPT_DEFAULT)` loads default script code.
+4. AAS types are read from the `aas_types` entityDef.
+
+### Map Load
+
+A new map enters through `InitFromNewMap()` in `game/Game_local.cpp`. It sets server/client flags, assigns the render and sound worlds, calls `LoadMap()`, initializes map scripts, spawns map entities, resets multiplayer state, precaches multiplayer assets, and marks the game active.
+
+`LoadMap()` in `game/Game_local.cpp` does the heavy reset work: parse `.map`, load collision models, clear entity arrays, reset timing, initialize `clip` and `pvs`, initialize AAS files, reset smoke particles, and cache extra media.
+
+`MapPopulate()` in `game/Game_local.cpp` calls `SpawnMapEntities()`, spreads location names, prepares initial spawn points, and services events so map script `main()` runs before the first real physics frame.
+
+### Frame Loop
+
+`RunFrame()` in `game/Game_local.cpp` is the main simulation loop. Per frame it:
+
+- Advances `framenum`, `time`, and `msec`
+- Copies user commands into `usercmds`
+- Updates the active player render view
+- Clears debug render data
+- Frees old smoke particles
+- Processes server entity network events
+- Updates gravity
+- Builds player PVS
+- Sorts active entities
+- Calls `ent->Think()` on every active entity
+- Services queued game events with `idEvent::ServiceEvents()`
+- Runs multiplayer logic through `mpGame.Run()`
+- Returns health/stamina/combat/session-command data to the engine
+
+Drawing is separate. `Draw()` in `game/Game_local.cpp` delegates to `mpGame.Draw()` for multiplayer, otherwise it renders the local player view through `player->playerView.RenderPlayerView()`.
+
+### Player Spawn
+
+`SpawnPlayer()` in `game/Game_local.cpp` builds spawn args, picks `player_doommarine` or `player_doommarine_mp`, calls `SpawnEntityDef()`, verifies the result is an `idPlayer`, updates `numClients`, then notifies `mpGame`.
+
+### Networking
+
+The async networking path is split into `game/Game_network.cpp`. Server snapshots start at `ServerWriteSnapshot()`. Client snapshot ingestion starts at `ClientReadSnapshot()`. Client-side prediction runs in `ClientPrediction()`.
+
+The key rule in that file: client game code should not spawn entities except while reading snapshots.
+
+### Entity Model
+
+Most gameplay objects inherit from `idEntity`, declared in `game/Entity.h`. It contains entity numbers, spawn args, script object, think flags, render/sound hooks, target lists, health, networking flags, and active/snapshot list nodes.
+
+Core inheritance path:
+
+- `idClass`: RTTI/events/spawn/save/restore base, in `game/gamesys/Class.h`
+- `idEntity`: base world object
+- `idAnimatedEntity`: animated renderable entity
+- `idAFEntity`: articulated figure entities
+- `idActor`: players and monsters, in `game/Actor.h`
+- `idPlayer`: player state/input/HUD/inventory, in `game/Player.h`
+- `idWeapon`: weapon state machine and script object, in `game/Weapon.h`
+
+### Good Reading Order
+
+Start here:
+
+1. `game/Game_local.h`: `idGameLocal` state and public API.
+2. `game/Game_local.cpp`: startup, map load, frame loop, draw.
+3. `game/Entity.h`: base entity contract.
+4. `game/Player.cpp`: player behavior.
+5. `game/Game_network.cpp`: multiplayer snapshots/prediction.
+6. `game/script/` and `game/gamesys/`: scripting, events, save games, commands, CVars.

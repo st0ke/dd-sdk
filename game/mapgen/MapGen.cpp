@@ -32,13 +32,17 @@ If you have questions concerning this license or the applicable additional terms
 
 #include "MapGen.h"
 
+static const int MAPGEN_BRUSH_SIDE_COUNT = 6;
+static const float MAPGEN_OPPOSITE_NORMAL_EPSILON = -0.999f;
+static const float MAPGEN_PLANE_DIST_EPSILON = 0.001f;
+
 static const char * const MAPGEN_SLOT_MATERIAL = "textures/common/mapgen_slot";
 static const char * const MAPGEN_OUTPUT_MAP = "maps/mapgen/current";
 static const char * const MAPGEN_HARDCODED_SLOT_NAME = "slot_0";
+static const char * const MAPGEN_FIRST_INSTANCE_PREFIX = "m0__";
+static const char * const MAPGEN_SECOND_INSTANCE_PREFIX = "m1__";
 
 typedef struct mapgenSlot_s {
-	idStr		name;
-	idPlane		plane;
 	idVec3		center;
 	idMat3		axis;
 	int			entityNum;
@@ -110,7 +114,7 @@ static bool MapGen_NormalizePlane( idPlane &plane ) {
 
 	plane.SetNormal( normal );
 	plane[3] /= length;
-	plane.FixDegeneracies( 0.001f );
+	plane.FixDegeneracies( MAPGEN_PLANE_DIST_EPSILON );
 	return true;
 }
 
@@ -133,10 +137,11 @@ void mapgenTransform::SetJoin( const mapgenSlot_t &sourceSlot, const mapgenSlot_
 
 idVec3 mapgenTransform::TransformVector( const idVec3 &v ) const {
 	idVec3 local;
-	local.x = v * sourceAxis[0];
-	local.y = v * sourceAxis[1];
-	local.z = v * sourceAxis[2];
-	return destAxis[0] * local.x + destAxis[1] * local.y + destAxis[2] * local.z;
+	idVec3 transformed;
+
+	sourceAxis.ProjectVector( v, local );
+	destAxis.UnprojectVector( local, transformed );
+	return transformed;
 }
 
 idVec3 mapgenTransform::TransformPoint( const idVec3 &p ) const {
@@ -169,7 +174,7 @@ idPlane mapgenTransform::TransformPlane( const idPlane &plane ) const {
 	rotatedPlane.SetNormal( rotatedNormal );
 	rotatedPlane.Normalize();
 	rotatedPlane.FitThroughPoint( rotatedPoint );
-	rotatedPlane.FixDegeneracies( 0.001f );
+	rotatedPlane.FixDegeneracies( MAPGEN_PLANE_DIST_EPSILON );
 	return rotatedPlane;
 }
 
@@ -179,27 +184,27 @@ static idVec3 MapGen_GetEntityOrigin( const idMapEntity *mapEnt ) {
 	return origin;
 }
 
-static int MapGen_FindOppositeSide( const idPlane planes[6], int sideNum ) {
-	for ( int i = 0; i < 6; i++ ) {
+static int MapGen_FindOppositeSide( const idPlane planes[MAPGEN_BRUSH_SIDE_COUNT], int sideNum ) {
+	for ( int i = 0; i < MAPGEN_BRUSH_SIDE_COUNT; i++ ) {
 		if ( i == sideNum ) {
 			continue;
 		}
-		if ( planes[sideNum].Normal() * planes[i].Normal() < -0.999f ) {
+		if ( planes[sideNum].Normal() * planes[i].Normal() < MAPGEN_OPPOSITE_NORMAL_EPSILON ) {
 			return i;
 		}
 	}
 	return -1;
 }
 
-static bool MapGen_CalculateBrushCenter( const idPlane planes[6], idVec3 &center ) {
-	bool used[6];
+static bool MapGen_CalculateBrushCenter( const idPlane planes[MAPGEN_BRUSH_SIDE_COUNT], idVec3 &center ) {
+	bool used[MAPGEN_BRUSH_SIDE_COUNT];
 	int numPairs;
 
 	memset( used, 0, sizeof( used ) );
 	center.Zero();
 	numPairs = 0;
 
-	for ( int i = 0; i < 6; i++ ) {
+	for ( int i = 0; i < MAPGEN_BRUSH_SIDE_COUNT; i++ ) {
 		if ( used[i] ) {
 			continue;
 		}
@@ -219,37 +224,45 @@ static bool MapGen_CalculateBrushCenter( const idPlane planes[6], idVec3 &center
 	return ( numPairs == 3 );
 }
 
-static bool MapGen_CalculateSlotAxis( const idPlane planes[6], int slotSideNum, int oppositeSideNum, idMat3 &axis ) {
+static bool MapGen_ProjectOntoPlane( const idVec3 &normal, const idVec3 &candidate, idVec3 &projected ) {
+	projected = candidate - normal * ( normal * candidate );
+	return ( projected.Normalize() != 0.0f );
+}
+
+static bool MapGen_CalculateSlotAxis( const idPlane planes[MAPGEN_BRUSH_SIDE_COUNT], int slotSideNum, int oppositeSideNum, idMat3 &axis ) {
 	idVec3 normal;
 	idVec3 projectedUp;
 	idVec3 bestUp;
 	float bestDot;
+	const idVec3 upCandidates[3] = {
+		idVec3( 0.0f, 0.0f, 1.0f ),
+		idVec3( 1.0f, 0.0f, 0.0f ),
+		idVec3( 0.0f, 1.0f, 0.0f )
+	};
 
 	normal = planes[slotSideNum].Normal();
 	if ( normal.Normalize() == 0.0f ) {
 		return false;
 	}
 
-	projectedUp = idVec3( 0.0f, 0.0f, 1.0f ) - normal * ( normal * idVec3( 0.0f, 0.0f, 1.0f ) );
-	if ( projectedUp.Normalize() == 0.0f ) {
-		projectedUp = idVec3( 1.0f, 0.0f, 0.0f ) - normal * normal.x;
-		if ( projectedUp.Normalize() == 0.0f ) {
-			projectedUp = idVec3( 0.0f, 1.0f, 0.0f ) - normal * normal.y;
-			if ( projectedUp.Normalize() == 0.0f ) {
-				return false;
-			}
+	for ( int i = 0; i < 3; i++ ) {
+		if ( MapGen_ProjectOntoPlane( normal, upCandidates[i], projectedUp ) ) {
+			break;
 		}
+	}
+	if ( projectedUp.Normalize() == 0.0f ) {
+		return false;
 	}
 
 	bestDot = -1.0f;
 	bestUp.Zero();
-	for ( int i = 0; i < 6; i++ ) {
+	for ( int i = 0; i < MAPGEN_BRUSH_SIDE_COUNT; i++ ) {
 		if ( i == slotSideNum || i == oppositeSideNum ) {
 			continue;
 		}
 
-		idVec3 tangent = planes[i].Normal() - normal * ( planes[i].Normal() * normal );
-		if ( tangent.Normalize() == 0.0f ) {
+		idVec3 tangent;
+		if ( !MapGen_ProjectOntoPlane( normal, planes[i].Normal(), tangent ) ) {
 			continue;
 		}
 
@@ -284,13 +297,13 @@ static bool MapGen_CalculateSlotAxis( const idPlane planes[6], int slotSideNum, 
 }
 
 static bool MapGen_CalculateSlotTransform( idMapBrush *brush, const idVec3 &origin, int slotSideNum, mapgenSlot_t &slot ) {
-	idPlane planes[6];
+	idPlane planes[MAPGEN_BRUSH_SIDE_COUNT];
 
-	if ( brush->GetNumSides() != 6 ) {
+	if ( brush->GetNumSides() != MAPGEN_BRUSH_SIDE_COUNT ) {
 		return false;
 	}
 
-	for ( int i = 0; i < 6; i++ ) {
+	for ( int i = 0; i < MAPGEN_BRUSH_SIDE_COUNT; i++ ) {
 		planes[i] = MapGen_LocalPlaneToWorld( brush->GetSide( i )->GetPlane(), origin );
 		if ( !MapGen_NormalizePlane( planes[i] ) ) {
 			return false;
@@ -310,8 +323,8 @@ static bool MapGen_CalculateSlotTransform( idMapBrush *brush, const idVec3 &orig
 		return false;
 	}
 
-	slot.plane = planes[slotSideNum];
-	slot.center -= slot.plane.Normal() * slot.plane.Distance( slot.center );
+	const idPlane &slotPlane = planes[slotSideNum];
+	slot.center -= slotPlane.Normal() * slotPlane.Distance( slot.center );
 	return true;
 }
 
@@ -359,7 +372,6 @@ static bool MapGen_FindSlot( const idMapFile &mapFile, const char *slotName, map
 					status = va( "slot '%s' must be a six-sided brush with a valid frame", slotName );
 					return false;
 				}
-				slot.name = slotName;
 				slot.entityNum = entityNum;
 				slot.primitiveNum = primitiveNum;
 				slot.sideNum = sideNum;
@@ -570,6 +582,17 @@ void mapgenNameRemapper::Build( idMapFile &mapFile, int numEntities, const char 
 }
 
 void mapgenNameRemapper::Apply( idDict &epairs ) const {
+	static const char * const retargetPrefixes[] = {
+		"target",
+		"guiTarget",
+		"buddy"
+	};
+	static const char * const retargetExactKeys[] = {
+		"bind",
+		"cameraTarget",
+		"syncLock"
+	};
+
 	const char *oldName = epairs.GetString( "name" );
 	const char *newName = FindName( namePairs, oldName );
 	if ( newName != NULL ) {
@@ -579,15 +602,23 @@ void mapgenNameRemapper::Apply( idDict &epairs ) const {
 	int numKeyVals = epairs.GetNumKeyVals();
 	for ( int i = 0; i < numKeyVals; i++ ) {
 		const idKeyValue *kv = epairs.GetKeyVal( i );
-		if ( !MapGen_KeyHasPrefix( kv, "target" ) && !MapGen_KeyHasPrefix( kv, "guiTarget" ) && !MapGen_KeyHasPrefix( kv, "buddy" ) ) {
+		bool shouldRetarget = false;
+
+		for ( int prefixIndex = 0; prefixIndex < sizeof( retargetPrefixes ) / sizeof( retargetPrefixes[0] ); prefixIndex++ ) {
+			if ( MapGen_KeyHasPrefix( kv, retargetPrefixes[prefixIndex] ) ) {
+				shouldRetarget = true;
+				break;
+			}
+		}
+		if ( !shouldRetarget ) {
 			continue;
 		}
 		RetargetValue( epairs, kv, namePairs );
 	}
 
-	RetargetExactKey( epairs, "bind" );
-	RetargetExactKey( epairs, "cameraTarget" );
-	RetargetExactKey( epairs, "syncLock" );
+	for ( int i = 0; i < sizeof( retargetExactKeys ) / sizeof( retargetExactKeys[0] ); i++ ) {
+		RetargetExactKey( epairs, retargetExactKeys[i] );
+	}
 
 	const idKeyValue *team = epairs.FindKey( "team" );
 	if ( team != NULL ) {
@@ -596,17 +627,53 @@ void mapgenNameRemapper::Apply( idDict &epairs ) const {
 }
 
 static void MapGen_TransformEntitySpawnArgs( idDict &epairs, const mapgenTransform &transform ) {
-	MapGen_RotatePointKey( epairs, "light_origin", transform );
-	MapGen_RotateVectorKey( epairs, "light_target", transform );
-	MapGen_RotateVectorKey( epairs, "light_right", transform );
-	MapGen_RotateVectorKey( epairs, "light_up", transform );
-	MapGen_RotateVectorKey( epairs, "light_start", transform );
-	MapGen_RotateVectorKey( epairs, "light_end", transform );
-	MapGen_RotateVectorKey( epairs, "light_center", transform );
-	MapGen_RotateMatrixKey( epairs, "rotation", transform );
-	MapGen_RotateMatrixKey( epairs, "light_rotation", transform );
+	static const char * const pointKeys[] = {
+		"light_origin"
+	};
+	static const char * const vectorKeys[] = {
+		"light_target",
+		"light_right",
+		"light_up",
+		"light_start",
+		"light_end",
+		"light_center"
+	};
+	static const char * const matrixKeys[] = {
+		"rotation",
+		"light_rotation"
+	};
+
+	for ( int i = 0; i < sizeof( pointKeys ) / sizeof( pointKeys[0] ); i++ ) {
+		MapGen_RotatePointKey( epairs, pointKeys[i], transform );
+	}
+	for ( int i = 0; i < sizeof( vectorKeys ) / sizeof( vectorKeys[0] ); i++ ) {
+		MapGen_RotateVectorKey( epairs, vectorKeys[i], transform );
+	}
+	for ( int i = 0; i < sizeof( matrixKeys ) / sizeof( matrixKeys[0] ); i++ ) {
+		MapGen_RotateMatrixKey( epairs, matrixKeys[i], transform );
+	}
 	MapGen_RotateAngleKey( epairs, "angle", transform );
 	MapGen_RotateMoveDirKey( epairs, "movedir", transform );
+}
+
+static bool MapGen_ClonePrimitives( idMapEntity *dstEnt, idMapEntity *srcEnt, const mapgenTransform &transform, const idVec3 &srcOrigin, const idVec3 &dstOrigin ) {
+	idList<idMapPrimitive *> clonedPrimitives;
+	int numPrimitives = srcEnt->GetNumPrimitives();
+
+	for ( int i = 0; i < numPrimitives; i++ ) {
+		idMapPrimitive *dstPrim = MapGen_ClonePrimitive( srcEnt->GetPrimitive( i ), transform, srcOrigin, dstOrigin );
+		if ( dstPrim == NULL ) {
+			clonedPrimitives.DeleteContents( true );
+			return false;
+		}
+		clonedPrimitives.Append( dstPrim );
+	}
+
+	for ( int i = 0; i < clonedPrimitives.Num(); i++ ) {
+		dstEnt->AddPrimitive( clonedPrimitives[i] );
+	}
+	clonedPrimitives.Clear();
+	return true;
 }
 
 static idMapEntity *MapGen_CloneEntity( idMapEntity *srcEnt, const mapgenTransform &transform, const mapgenNameRemapper &remapper ) {
@@ -620,11 +687,9 @@ static idMapEntity *MapGen_CloneEntity( idMapEntity *srcEnt, const mapgenTransfo
 	remapper.Apply( dstEnt->epairs );
 	MapGen_TransformEntitySpawnArgs( dstEnt->epairs, transform );
 
-	for ( int i = 0; i < srcEnt->GetNumPrimitives(); i++ ) {
-		idMapPrimitive *dstPrim = MapGen_ClonePrimitive( srcEnt->GetPrimitive( i ), transform, srcOrigin, dstOrigin );
-		if ( dstPrim != NULL ) {
-			dstEnt->AddPrimitive( dstPrim );
-		}
+	if ( !MapGen_ClonePrimitives( dstEnt, srcEnt, transform, srcOrigin, dstOrigin ) ) {
+		delete dstEnt;
+		return NULL;
 	}
 
 	return dstEnt;
@@ -632,17 +697,7 @@ static idMapEntity *MapGen_CloneEntity( idMapEntity *srcEnt, const mapgenTransfo
 
 static bool MapGen_DuplicateWorldspawn( idMapEntity *worldspawn, const mapgenTransform &transform ) {
 	idVec3 origin = MapGen_GetEntityOrigin( worldspawn );
-	int numPrimitives = worldspawn->GetNumPrimitives();
-
-	for ( int i = 0; i < numPrimitives; i++ ) {
-		idMapPrimitive *dstPrim = MapGen_ClonePrimitive( worldspawn->GetPrimitive( i ), transform, origin, origin );
-		if ( dstPrim == NULL ) {
-			return false;
-		}
-		worldspawn->AddPrimitive( dstPrim );
-	}
-
-	return true;
+	return MapGen_ClonePrimitives( worldspawn, worldspawn, transform, origin, origin );
 }
 
 bool MapGen_DMap( const char *sourceMapName, idStr &outputMapName, idStr &status ) {
@@ -667,10 +722,10 @@ bool MapGen_DMap( const char *sourceMapName, idStr &outputMapName, idStr &status
 
 	int numEntities = mapFile.GetNumEntities();
 	mapgenNameRemapper firstInstanceNames;
-	firstInstanceNames.Build( mapFile, numEntities, "m0__" );
+	firstInstanceNames.Build( mapFile, numEntities, MAPGEN_FIRST_INSTANCE_PREFIX );
 
 	mapgenNameRemapper secondInstanceNames;
-	secondInstanceNames.Build( mapFile, numEntities, "m1__" );
+	secondInstanceNames.Build( mapFile, numEntities, MAPGEN_SECOND_INSTANCE_PREFIX );
 
 	mapgenTransform secondInstanceTransform;
 	secondInstanceTransform.SetJoin( slot, slot );
@@ -682,7 +737,12 @@ bool MapGen_DMap( const char *sourceMapName, idStr &outputMapName, idStr &status
 	}
 
 	for ( int i = 1; i < numEntities; i++ ) {
-		mapFile.AddEntity( MapGen_CloneEntity( mapFile.GetEntity( i ), secondInstanceTransform, secondInstanceNames ) );
+		idMapEntity *clonedEntity = MapGen_CloneEntity( mapFile.GetEntity( i ), secondInstanceTransform, secondInstanceNames );
+		if ( clonedEntity == NULL ) {
+			status = va( "could not duplicate entity %d primitives", i );
+			return false;
+		}
+		mapFile.AddEntity( clonedEntity );
 	}
 
 	for ( int i = 1; i < numEntities; i++ ) {
@@ -698,6 +758,6 @@ bool MapGen_DMap( const char *sourceMapName, idStr &outputMapName, idStr &status
 		return false;
 	}
 
-	status = va( "joined %s as m0__%s to m1__%s using entity %d primitive %d side %d opposite %d", MAPGEN_HARDCODED_SLOT_NAME, MAPGEN_HARDCODED_SLOT_NAME, MAPGEN_HARDCODED_SLOT_NAME, slot.entityNum, slot.primitiveNum, slot.sideNum, slot.oppositeSideNum );
+	status = va( "joined %s as %s%s to %s%s using entity %d primitive %d side %d opposite %d", MAPGEN_HARDCODED_SLOT_NAME, MAPGEN_FIRST_INSTANCE_PREFIX, MAPGEN_HARDCODED_SLOT_NAME, MAPGEN_SECOND_INSTANCE_PREFIX, MAPGEN_HARDCODED_SLOT_NAME, slot.entityNum, slot.primitiveNum, slot.sideNum, slot.oppositeSideNum );
 	return true;
 }

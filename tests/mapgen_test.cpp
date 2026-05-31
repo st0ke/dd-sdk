@@ -87,6 +87,12 @@ static void ExpectString( const char *actual, const char *expected, const char *
 	}
 }
 
+static void ExpectContains( const char *actual, const char *expected, const char *message ) {
+	if ( std::string( actual ).find( expected ) == std::string::npos ) {
+		throw TestFailure( std::string( message ) + ": expected '" + actual + "' to contain '" + expected + "'" );
+	}
+}
+
 static void ExpectNear( float actual, float expected, float epsilon, const char *message ) {
 	if ( idMath::Fabs( actual - expected ) > epsilon ) {
 		char buffer[256];
@@ -429,6 +435,15 @@ static const char *MAPGEN_SMOKE_MAP =
 	"\"team\" \"door_team\"\n"
 	"\"angle\" \"90\"\n"
 	"\"movedir\" \"0\"\n"
+	"\"rotation\" \"1 0 0 0 1 0 0 0 1\"\n"
+	"\"light_rotation\" \"1 0 0 0 1 0 0 0 1\"\n"
+	"\"light_origin\" \"64 16 8\"\n"
+	"\"light_target\" \"1 2 3\"\n"
+	"\"light_right\" \"4 5 6\"\n"
+	"\"light_up\" \"7 8 9\"\n"
+	"\"light_start\" \"10 11 12\"\n"
+	"\"light_end\" \"13 14 15\"\n"
+	"\"light_center\" \"16 17 18\"\n"
 	"\"origin\" \"64 0 0\"\n"
 	"}\n";
 
@@ -461,6 +476,53 @@ static const char *MAPGEN_HORIZONTAL_SLOT_MAP =
 	"\"name\" \"marker\"\n"
 	"\"movedir\" \"-1\"\n"
 	"\"origin\" \"0 0 64\"\n"
+	"}\n";
+
+static const char *MAPGEN_BAD_SLOT_BRUSH_MAP =
+	"Version 2\n"
+	"// entity 0\n"
+	"{\n"
+	"\"classname\" \"worldspawn\"\n"
+	"}\n"
+	"// entity 1\n"
+	"{\n"
+	"\"classname\" \"func_static\"\n"
+	"\"name\" \"slot_0\"\n"
+	"\"origin\" \"0 0 0\"\n"
+	"{\n"
+	" brushDef3\n"
+	" {\n"
+	"  ( 1 0 0 0 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/mapgen_slot\" 0 0 0\n"
+	"  ( -1 0 0 -16 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
+	"  ( 0 1 0 -64 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
+	"  ( 0 -1 0 -64 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
+	"  ( 0 0 1 -64 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
+	" }\n"
+	"}\n"
+	"}\n";
+
+static const char *MAPGEN_MULTIPLE_SLOT_FACES_MAP =
+	"Version 2\n"
+	"// entity 0\n"
+	"{\n"
+	"\"classname\" \"worldspawn\"\n"
+	"}\n"
+	"// entity 1\n"
+	"{\n"
+	"\"classname\" \"func_static\"\n"
+	"\"name\" \"slot_0\"\n"
+	"\"origin\" \"0 0 0\"\n"
+	"{\n"
+	" brushDef3\n"
+	" {\n"
+	"  ( 1 0 0 0 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/mapgen_slot\" 0 0 0\n"
+	"  ( -1 0 0 -16 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/mapgen_slot\" 0 0 0\n"
+	"  ( 0 1 0 -64 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
+	"  ( 0 -1 0 -64 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
+	"  ( 0 0 1 -64 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
+	"  ( 0 0 -1 -64 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
+	" }\n"
+	"}\n"
 	"}\n";
 
 static void RunMapGenSmokeTest( TestFileSystem &testFileSystem ) {
@@ -518,6 +580,30 @@ static void RunMapGenSmokeTest( TestFileSystem &testFileSystem ) {
 	Expect( secondMarker->epairs.GetFloat( "angle", "0", angle ), "rotated angle is missing" );
 	ExpectNear( angle, 270.0f, 0.01f, "rotated angle" );
 
+	idMat3 rotation;
+	Expect( secondMarker->epairs.GetMatrix( "rotation", "", rotation ), "rotated rotation matrix is missing" );
+	ExpectNear( rotation[0].x, -1.0f, 0.01f, "rotated rotation x axis x" );
+	ExpectNear( rotation[1].y, -1.0f, 0.01f, "rotated rotation y axis y" );
+	ExpectNear( rotation[2].z, 1.0f, 0.01f, "rotated rotation z axis z" );
+
+	idMat3 lightRotation;
+	Expect( secondMarker->epairs.GetMatrix( "light_rotation", "", lightRotation ), "rotated light_rotation matrix is missing" );
+	ExpectNear( lightRotation[0].x, -1.0f, 0.01f, "rotated light_rotation x axis x" );
+	ExpectNear( lightRotation[1].y, -1.0f, 0.01f, "rotated light_rotation y axis y" );
+	ExpectNear( lightRotation[2].z, 1.0f, 0.01f, "rotated light_rotation z axis z" );
+
+	idVec3 lightOrigin;
+	secondMarker->epairs.GetVector( "light_origin", "0 0 0", lightOrigin );
+	ExpectNear( lightOrigin.x, -64.0f, 0.01f, "rotated light_origin x" );
+	ExpectNear( lightOrigin.y, -16.0f, 0.01f, "rotated light_origin y" );
+	ExpectNear( lightOrigin.z, 8.0f, 0.01f, "rotated light_origin z" );
+
+	idVec3 lightTarget;
+	secondMarker->epairs.GetVector( "light_target", "0 0 0", lightTarget );
+	ExpectNear( lightTarget.x, -1.0f, 0.01f, "rotated light_target x" );
+	ExpectNear( lightTarget.y, -2.0f, 0.01f, "rotated light_target y" );
+	ExpectNear( lightTarget.z, 3.0f, 0.01f, "rotated light_target z" );
+
 	idVec3 rotatedOrigin;
 	secondMarker->epairs.GetVector( "origin", "0 0 0", rotatedOrigin );
 	ExpectNear( rotatedOrigin.x, -64.0f, 0.01f, "rotated origin x" );
@@ -561,6 +647,25 @@ static void RunMapGenHorizontalSlotTest( TestFileSystem &testFileSystem ) {
 	ExpectNear( rotatedOrigin.z, -64.0f, 0.01f, "horizontal rotated origin z" );
 }
 
+static void RunMapGenInvalidSlotTests( TestFileSystem &testFileSystem ) {
+	idStr outputMapName;
+	idStr status;
+
+	testFileSystem.RemoveFile( "maps/mapgen/current.map" );
+	testFileSystem.AddFile( "maps/mapgen_bad_slot.map", MAPGEN_BAD_SLOT_BRUSH_MAP );
+	Expect( !MapGen_DMap( "mapgen_bad_slot", outputMapName, status ), "bad slot brush unexpectedly succeeded" );
+	ExpectContains( status.c_str(), "must be a six-sided brush", "unexpected bad slot brush status" );
+	Expect( testFileSystem.GetFileContents( "maps/mapgen/current.map" ) == NULL, "bad slot brush wrote an output map" );
+
+	status.Clear();
+	outputMapName.Clear();
+	testFileSystem.RemoveFile( "maps/mapgen/current.map" );
+	testFileSystem.AddFile( "maps/mapgen_multiple_slot_faces.map", MAPGEN_MULTIPLE_SLOT_FACES_MAP );
+	Expect( !MapGen_DMap( "mapgen_multiple_slot_faces", outputMapName, status ), "multiple slot faces unexpectedly succeeded" );
+	ExpectContains( status.c_str(), "multiple 'textures/common/mapgen_slot' faces", "unexpected multiple slot faces status" );
+	Expect( testFileSystem.GetFileContents( "maps/mapgen/current.map" ) == NULL, "multiple slot faces wrote an output map" );
+}
+
 int main( int argc, char **argv ) {
 	TestCommon testCommon;
 	TestFileSystem testFileSystem;
@@ -576,6 +681,7 @@ int main( int argc, char **argv ) {
 		idLibInitialized = true;
 		RunMapGenSmokeTest( testFileSystem );
 		RunMapGenHorizontalSlotTest( testFileSystem );
+		RunMapGenInvalidSlotTests( testFileSystem );
 	} catch ( const std::exception &ex ) {
 		if ( idLibInitialized ) {
 			idLib::ShutDown();

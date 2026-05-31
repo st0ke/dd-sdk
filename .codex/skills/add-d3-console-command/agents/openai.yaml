@@ -1,0 +1,4 @@
+interface:
+  display_name: "Add D3 Console Command"
+  short_description: "Add Doom 3 SDK console commands"
+  default_prompt: "Use $add-d3-console-command to add a console command to this dhewm3 SDK mod."

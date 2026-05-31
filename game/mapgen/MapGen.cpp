@@ -32,9 +32,8 @@ If you have questions concerning this license or the applicable additional terms
 
 #include "MapGen.h"
 
-static const int MAPGEN_BRUSH_SIDE_COUNT = 6;
-static const float MAPGEN_OPPOSITE_NORMAL_EPSILON = -0.999f;
 static const float MAPGEN_PLANE_DIST_EPSILON = 0.001f;
+static const float MAPGEN_VERTICAL_SLOT_EPSILON = 0.001f;
 
 static const char * const MAPGEN_SLOT_MATERIAL = "textures/common/mapgen_slot";
 static const char * const MAPGEN_OUTPUT_MAP = "maps/mapgen/current";
@@ -43,20 +42,17 @@ static const char * const MAPGEN_FIRST_INSTANCE_PREFIX = "m0__";
 static const char * const MAPGEN_SECOND_INSTANCE_PREFIX = "m1__";
 
 typedef struct mapgenSlot_s {
-	idVec3		center;
-	idMat3		axis;
+	idPlane		plane;
+	idVec3		anchor;
 	int			entityNum;
 	int			primitiveNum;
 	int			sideNum;
-	int			oppositeSideNum;
 } mapgenSlot_t;
 
 class mapgenTransform {
 public:
-	idVec3		sourceCenter;
-	idVec3		destCenter;
-	idMat3		sourceAxis;
-	idMat3		destAxis;
+	idMat3		rotation;
+	idVec3		translation;
 
 	void		SetJoin( const mapgenSlot_t &sourceSlot, const mapgenSlot_t &destSlot );
 	idVec3		TransformVector( const idVec3 &v ) const;
@@ -119,33 +115,22 @@ static bool MapGen_NormalizePlane( idPlane &plane ) {
 }
 
 void mapgenTransform::SetJoin( const mapgenSlot_t &sourceSlot, const mapgenSlot_t &destSlot ) {
-	idMat3 joinedDestAxis = destSlot.axis;
+	idVec3 sourceNormal = sourceSlot.plane.Normal();
+	idVec3 joinedDestNormal = -destSlot.plane.Normal();
+	float sourceYaw = idMath::ATan( sourceNormal.y, sourceNormal.x );
+	float destYaw = idMath::ATan( joinedDestNormal.y, joinedDestNormal.x );
+	float yaw = RAD2DEG( destYaw - sourceYaw );
 
-	sourceCenter = sourceSlot.center;
-	destCenter = destSlot.center;
-	sourceAxis = sourceSlot.axis;
-
-	joinedDestAxis[0] = -joinedDestAxis[0];
-	joinedDestAxis[0].Normalize();
-	joinedDestAxis[1] = joinedDestAxis[2].Cross( joinedDestAxis[0] );
-	joinedDestAxis[1].Normalize();
-	joinedDestAxis[2] = joinedDestAxis[0].Cross( joinedDestAxis[1] );
-	joinedDestAxis[2].Normalize();
-	joinedDestAxis.FixDegeneracies();
-	destAxis = joinedDestAxis;
+	rotation = idAngles( 0.0f, yaw, 0.0f ).ToMat3();
+	translation = destSlot.anchor - rotation * sourceSlot.anchor;
 }
 
 idVec3 mapgenTransform::TransformVector( const idVec3 &v ) const {
-	idVec3 local;
-	idVec3 transformed;
-
-	sourceAxis.ProjectVector( v, local );
-	destAxis.UnprojectVector( local, transformed );
-	return transformed;
+	return rotation * v;
 }
 
 idVec3 mapgenTransform::TransformPoint( const idVec3 &p ) const {
-	return TransformVector( p - sourceCenter ) + destCenter;
+	return TransformVector( p ) + translation;
 }
 
 static idPlane MapGen_LocalPlaneToWorld( const idPlane &localPlane, const idVec3 &origin ) {
@@ -184,147 +169,15 @@ static idVec3 MapGen_GetEntityOrigin( const idMapEntity *mapEnt ) {
 	return origin;
 }
 
-static int MapGen_FindOppositeSide( const idPlane planes[MAPGEN_BRUSH_SIDE_COUNT], int sideNum ) {
-	for ( int i = 0; i < MAPGEN_BRUSH_SIDE_COUNT; i++ ) {
-		if ( i == sideNum ) {
-			continue;
-		}
-		if ( planes[sideNum].Normal() * planes[i].Normal() < MAPGEN_OPPOSITE_NORMAL_EPSILON ) {
-			return i;
-		}
-	}
-	return -1;
-}
-
-static bool MapGen_CalculateBrushCenter( const idPlane planes[MAPGEN_BRUSH_SIDE_COUNT], idVec3 &center ) {
-	bool used[MAPGEN_BRUSH_SIDE_COUNT];
-	int numPairs;
-
-	memset( used, 0, sizeof( used ) );
-	center.Zero();
-	numPairs = 0;
-
-	for ( int i = 0; i < MAPGEN_BRUSH_SIDE_COUNT; i++ ) {
-		if ( used[i] ) {
-			continue;
-		}
-
-		int oppositeSideNum = MapGen_FindOppositeSide( planes, i );
-		if ( oppositeSideNum < 0 || used[oppositeSideNum] ) {
-			return false;
-		}
-
-		float centerDist = ( planes[i].Dist() - planes[oppositeSideNum].Dist() ) * 0.5f;
-		center += planes[i].Normal() * centerDist;
-		used[i] = true;
-		used[oppositeSideNum] = true;
-		numPairs++;
-	}
-
-	return ( numPairs == 3 );
-}
-
-static bool MapGen_ProjectOntoPlane( const idVec3 &normal, const idVec3 &candidate, idVec3 &projected ) {
-	projected = candidate - normal * ( normal * candidate );
-	return ( projected.Normalize() != 0.0f );
-}
-
-static bool MapGen_CalculateSlotAxis( const idPlane planes[MAPGEN_BRUSH_SIDE_COUNT], int slotSideNum, int oppositeSideNum, idMat3 &axis ) {
-	idVec3 normal;
-	idVec3 projectedUp;
-	idVec3 bestUp;
-	float bestDot;
-	const idVec3 upCandidates[3] = {
-		idVec3( 0.0f, 0.0f, 1.0f ),
-		idVec3( 1.0f, 0.0f, 0.0f ),
-		idVec3( 0.0f, 1.0f, 0.0f )
-	};
-
-	normal = planes[slotSideNum].Normal();
-	if ( normal.Normalize() == 0.0f ) {
+static bool MapGen_CalculateSlotTransform( idMapBrushSide *side, const idVec3 &origin, mapgenSlot_t &slot ) {
+	slot.plane = MapGen_LocalPlaneToWorld( side->GetPlane(), origin );
+	if ( !MapGen_NormalizePlane( slot.plane ) ) {
 		return false;
 	}
-
-	for ( int i = 0; i < 3; i++ ) {
-		if ( MapGen_ProjectOntoPlane( normal, upCandidates[i], projectedUp ) ) {
-			break;
-		}
-	}
-	if ( projectedUp.Normalize() == 0.0f ) {
+	if ( idMath::Fabs( slot.plane.Normal().z ) > MAPGEN_VERTICAL_SLOT_EPSILON ) {
 		return false;
 	}
-
-	bestDot = -1.0f;
-	bestUp.Zero();
-	for ( int i = 0; i < MAPGEN_BRUSH_SIDE_COUNT; i++ ) {
-		if ( i == slotSideNum || i == oppositeSideNum ) {
-			continue;
-		}
-
-		idVec3 tangent;
-		if ( !MapGen_ProjectOntoPlane( normal, planes[i].Normal(), tangent ) ) {
-			continue;
-		}
-
-		float dot = idMath::Fabs( tangent * projectedUp );
-
-		if ( dot > bestDot ) {
-			bestDot = dot;
-			bestUp = tangent;
-		}
-	}
-
-	if ( bestDot < 0.0f ) {
-		return false;
-	}
-
-	if ( bestUp * projectedUp < 0.0f ) {
-		bestUp = -bestUp;
-	}
-
-	axis[0] = normal;
-	axis[2] = bestUp;
-	axis[1] = axis[2].Cross( axis[0] );
-	if ( axis[1].Normalize() == 0.0f ) {
-		return false;
-	}
-	axis[2] = axis[0].Cross( axis[1] );
-	if ( axis[2].Normalize() == 0.0f ) {
-		return false;
-	}
-	axis.FixDegeneracies();
-	return true;
-}
-
-static bool MapGen_CalculateSlotTransform( idMapBrush *brush, const idVec3 &origin, int slotSideNum, mapgenSlot_t &slot ) {
-	idPlane planes[MAPGEN_BRUSH_SIDE_COUNT];
-
-	if ( brush->GetNumSides() != MAPGEN_BRUSH_SIDE_COUNT ) {
-		return false;
-	}
-
-	for ( int i = 0; i < MAPGEN_BRUSH_SIDE_COUNT; i++ ) {
-		planes[i] = MapGen_LocalPlaneToWorld( brush->GetSide( i )->GetPlane(), origin );
-		if ( !MapGen_NormalizePlane( planes[i] ) ) {
-			return false;
-		}
-	}
-
-	slot.oppositeSideNum = MapGen_FindOppositeSide( planes, slotSideNum );
-	if ( slot.oppositeSideNum < 0 ) {
-		return false;
-	}
-
-	if ( !MapGen_CalculateBrushCenter( planes, slot.center ) ) {
-		return false;
-	}
-
-	if ( !MapGen_CalculateSlotAxis( planes, slotSideNum, slot.oppositeSideNum, slot.axis ) ) {
-		return false;
-	}
-
-	const idPlane &slotPlane = planes[slotSideNum];
-	slot.center -= slotPlane.Normal() * slotPlane.Distance( slot.center );
+	slot.anchor = slot.plane.Normal() * slot.plane.Dist();
 	return true;
 }
 
@@ -368,8 +221,8 @@ static bool MapGen_FindSlot( const idMapFile &mapFile, const char *slotName, map
 					return false;
 				}
 
-				if ( !MapGen_CalculateSlotTransform( brush, origin, sideNum, slot ) ) {
-					status = va( "slot '%s' must be a six-sided brush with a valid frame", slotName );
+				if ( !MapGen_CalculateSlotTransform( side, origin, slot ) ) {
+					status = va( "slot '%s' face must be vertical", slotName );
 					return false;
 				}
 				slot.entityNum = entityNum;
@@ -758,6 +611,6 @@ bool MapGen_DMap( const char *sourceMapName, idStr &outputMapName, idStr &status
 		return false;
 	}
 
-	status = va( "joined %s as %s%s to %s%s using entity %d primitive %d side %d opposite %d", MAPGEN_HARDCODED_SLOT_NAME, MAPGEN_FIRST_INSTANCE_PREFIX, MAPGEN_HARDCODED_SLOT_NAME, MAPGEN_SECOND_INSTANCE_PREFIX, MAPGEN_HARDCODED_SLOT_NAME, slot.entityNum, slot.primitiveNum, slot.sideNum, slot.oppositeSideNum );
+	status = va( "joined %s as %s%s to %s%s using entity %d primitive %d side %d", MAPGEN_HARDCODED_SLOT_NAME, MAPGEN_FIRST_INSTANCE_PREFIX, MAPGEN_HARDCODED_SLOT_NAME, MAPGEN_SECOND_INSTANCE_PREFIX, MAPGEN_HARDCODED_SLOT_NAME, slot.entityNum, slot.primitiveNum, slot.sideNum );
 	return true;
 }

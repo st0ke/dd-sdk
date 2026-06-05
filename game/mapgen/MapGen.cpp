@@ -38,9 +38,10 @@ static const float MAPGEN_VERTICAL_SLOT_EPSILON = 0.001f;
 
 static const char * const MAPGEN_SLOT_MATERIAL = "textures/common/mapgen_slot";
 static const char * const MAPGEN_OUTPUT_MAP = "maps/mapgen/current";
-static const char * const MAPGEN_HARDCODED_SLOT_NAME = "slot_0";
-static const char * const MAPGEN_FIRST_INSTANCE_PREFIX = "m0__";
-static const char * const MAPGEN_SECOND_INSTANCE_PREFIX = "m1__";
+static const char * const MAPGEN_BUILTIN_PLAN_NAME = "gate2_testgg";
+static const char * const MAPGEN_TESTGG_PREFIX = "m0__";
+static const char * const MAPGEN_FIRST_GATE_PREFIX = "m1__";
+static const char * const MAPGEN_SECOND_GATE_PREFIX = "m2__";
 
 class mapgenTransform;
 
@@ -179,42 +180,88 @@ private:
 	idVec3				GetEntityOrigin( const idMapEntity *mapEnt ) const;
 };
 
+class mapgenJoinPlanMap {
+public:
+						mapgenJoinPlanMap();
+						mapgenJoinPlanMap( const char *mapName, const char *prefix );
+
+	const char *		MapName( void ) const { return mapName.c_str(); }
+	const char *		Prefix( void ) const { return prefix.c_str(); }
+
+private:
+	idStr				mapName;
+	idStr				prefix;
+};
+
+class mapgenJoinPlanJoin {
+public:
+						mapgenJoinPlanJoin();
+						mapgenJoinPlanJoin( int sourceMapIndex, const char *sourceSlotName, int destMapIndex, const char *destSlotName );
+
+	int					SourceMapIndex( void ) const { return sourceMapIndex; }
+	const char *		SourceSlotName( void ) const { return sourceSlotName.c_str(); }
+	int					DestMapIndex( void ) const { return destMapIndex; }
+	const char *		DestSlotName( void ) const { return destSlotName.c_str(); }
+
+private:
+	int					sourceMapIndex;
+	idStr				sourceSlotName;
+	int					destMapIndex;
+	idStr				destSlotName;
+};
+
+class mapgenJoinPlan {
+public:
+						mapgenJoinPlan();
+
+	bool				Load( const char *planName, idStr &status );
+	int					NumMaps( void ) const { return maps.Num(); }
+	const mapgenJoinPlanMap &Map( int index ) const { return maps[index]; }
+	int					NumJoins( void ) const { return joins.Num(); }
+	const mapgenJoinPlanJoin &Join( int index ) const { return joins[index]; }
+
+private:
+	idList<mapgenJoinPlanMap> maps;
+	idList<mapgenJoinPlanJoin> joins;
+
+	bool				LoadFromDisk( const char *planName, idStr &status );
+	void				BuildGate2TestggPlan( void );
+};
+
 class mapgenMapJoiner {
 public:
-						mapgenMapJoiner( idMapFile &mapFile, const mapgenSlot &slot );
+						mapgenMapJoiner( idMapFile &destMap, idMapFile &sourceMap, const mapgenSlot &sourceSlot, const mapgenSlot &destSlot, const char *prefix );
 	bool				Join( idStr &status );
 
 private:
-	idMapFile &			mapFile;
-	const mapgenSlot &	slot;
-	int					originalNumEntities;
-	mapgenNameRemapper	firstInstanceNames;
-	mapgenNameRemapper	secondInstanceNames;
-	mapgenTransform		secondInstanceTransform;
+	idMapFile &			destMap;
+	idMapFile &			sourceMap;
+	mapgenNameRemapper	sourceNames;
+	mapgenTransform		transform;
 
-	void				BuildInstanceState( void );
-	bool				DuplicateWorldspawn( idStr &status );
-	bool				DuplicateEntities( idStr &status );
-	void				RenameFirstInstance( void );
+	bool				CopyWorldspawn( idStr &status );
+	bool				CopyEntities( idStr &status );
 	idVec3				GetEntityOrigin( const idMapEntity *mapEnt ) const;
 };
 
 class mapgenDMapJob {
 public:
 						mapgenDMapJob();
-	bool				Run( const char *sourceMapName, idStr &outputMapName, idStr &status );
+	bool				Run( const char *planName, idStr &outputMapName, idStr &status );
 
 private:
-	idMapFile			mapFile;
-	idStr				inputMapName;
+	idMapFile			outputMap;
+	int					firstMapNumEntities;
 	idStr				status;
 
-	bool				Generate( const char *sourceMapName, idStr &outputMapName );
-	void				NormalizeInputMapName( const char *sourceMapName );
-	bool				ParseMap( void );
-	bool				FindSlot( mapgenSlot &slot );
+	bool				Generate( const char *planName, idStr &outputMapName );
+	idStr				NormalizeMapName( const char *mapName ) const;
+	bool				ParseMap( const char *mapName, idMapFile &mapFile );
+	bool				FindSlot( const idMapFile &mapFile, const char *mapName, const char *slotName, mapgenSlot &slot );
+	bool				ApplyJoin( const mapgenJoinPlan &plan, const mapgenJoinPlanJoin &join );
+	void				PrefixFirstMapEntities( const char *prefix );
 	bool				WriteOutputMap( idStr &outputMapName );
-	void				SetSuccessStatus( const mapgenSlot &slot );
+	void				SetSuccessStatus( const char *planName, int numJoins );
 };
 
 mapgenSlot::mapgenSlot() :
@@ -681,6 +728,7 @@ void mapgenNameRemapper::Apply( idDict &epairs ) const {
 	static const char * const retargetExactKeys[] = {
 		"bind",
 		"cameraTarget",
+		"model",
 		"syncLock"
 	};
 
@@ -801,64 +849,106 @@ idMapEntity *mapgenEntityDuplicator::Clone( void ) const {
 	return dstEnt;
 }
 
-mapgenMapJoiner::mapgenMapJoiner( idMapFile &mapFile, const mapgenSlot &slot ) :
-	mapFile( mapFile ),
-	slot( slot ),
-	originalNumEntities( 0 ),
-	firstInstanceNames(),
-	secondInstanceNames(),
-	secondInstanceTransform() {
+mapgenJoinPlanMap::mapgenJoinPlanMap() :
+	mapName( "" ),
+	prefix( "" ) {
+}
+
+mapgenJoinPlanMap::mapgenJoinPlanMap( const char *mapName, const char *prefix ) :
+	mapName( mapName ),
+	prefix( prefix ) {
+}
+
+mapgenJoinPlanJoin::mapgenJoinPlanJoin() :
+	sourceMapIndex( -1 ),
+	sourceSlotName( "" ),
+	destMapIndex( -1 ),
+	destSlotName( "" ) {
+}
+
+mapgenJoinPlanJoin::mapgenJoinPlanJoin( int sourceMapIndex, const char *sourceSlotName, int destMapIndex, const char *destSlotName ) :
+	sourceMapIndex( sourceMapIndex ),
+	sourceSlotName( sourceSlotName ),
+	destMapIndex( destMapIndex ),
+	destSlotName( destSlotName ) {
+}
+
+mapgenJoinPlan::mapgenJoinPlan() :
+	maps(),
+	joins() {
+}
+
+bool mapgenJoinPlan::Load( const char *planName, idStr &status ) {
+	maps.Clear();
+	joins.Clear();
+
+	if ( LoadFromDisk( planName, status ) ) {
+		return true;
+	}
+	if ( idStr::Icmp( planName, MAPGEN_BUILTIN_PLAN_NAME ) == 0 ) {
+		BuildGate2TestggPlan();
+		return true;
+	}
+
+	status = va( "unknown mapgen plan '%s'", planName );
+	return false;
+}
+
+bool mapgenJoinPlan::LoadFromDisk( const char *planName, idStr &status ) {
+	// Future plan-file parsing enters here; built-in plans remain the fallback.
+	( void )planName;
+	( void )status;
+	return false;
+}
+
+void mapgenJoinPlan::BuildGate2TestggPlan( void ) {
+	maps.Append( mapgenJoinPlanMap( "mapgen/testgg", MAPGEN_TESTGG_PREFIX ) );
+	maps.Append( mapgenJoinPlanMap( "mapgen/gate2", MAPGEN_FIRST_GATE_PREFIX ) );
+	maps.Append( mapgenJoinPlanMap( "mapgen/gate2", MAPGEN_SECOND_GATE_PREFIX ) );
+	joins.Append( mapgenJoinPlanJoin( 1, "slot_0", 0, "slot_gg0" ) );
+	joins.Append( mapgenJoinPlanJoin( 2, "slot_0", 0, "slot_gg1" ) );
+}
+
+mapgenMapJoiner::mapgenMapJoiner( idMapFile &destMap, idMapFile &sourceMap, const mapgenSlot &sourceSlot, const mapgenSlot &destSlot, const char *prefix ) :
+	destMap( destMap ),
+	sourceMap( sourceMap ),
+	sourceNames(),
+	transform( sourceSlot, destSlot ) {
+	sourceNames.Build( sourceMap, sourceMap.GetNumEntities(), prefix );
 }
 
 bool mapgenMapJoiner::Join( idStr &status ) {
-	BuildInstanceState();
-	if ( !DuplicateWorldspawn( status ) ) {
+	if ( !CopyWorldspawn( status ) ) {
 		return false;
 	}
-	if ( !DuplicateEntities( status ) ) {
-		return false;
-	}
-
-	RenameFirstInstance();
-	return true;
+	return CopyEntities( status );
 }
 
-void mapgenMapJoiner::BuildInstanceState( void ) {
-	originalNumEntities = mapFile.GetNumEntities();
-	firstInstanceNames.Build( mapFile, originalNumEntities, MAPGEN_FIRST_INSTANCE_PREFIX );
-	secondInstanceNames.Build( mapFile, originalNumEntities, MAPGEN_SECOND_INSTANCE_PREFIX );
-	secondInstanceTransform = slot.BuildJoinTransform( slot );
-}
+bool mapgenMapJoiner::CopyWorldspawn( idStr &status ) {
+	idMapEntity *sourceWorldspawn = sourceMap.GetEntity( 0 );
+	idMapEntity *destWorldspawn = destMap.GetEntity( 0 );
+	idVec3 sourceOrigin = GetEntityOrigin( sourceWorldspawn );
+	idVec3 destOrigin = GetEntityOrigin( destWorldspawn );
+	mapgenPrimitiveCloner cloner( transform, sourceOrigin, destOrigin );
 
-bool mapgenMapJoiner::DuplicateWorldspawn( idStr &status ) {
-	idMapEntity *worldspawn = mapFile.GetEntity( 0 );
-	idVec3 origin = GetEntityOrigin( worldspawn );
-	mapgenPrimitiveCloner cloner( secondInstanceTransform, origin, origin );
-
-	if ( !cloner.ClonePrimitives( worldspawn, worldspawn ) ) {
-		status = "could not duplicate worldspawn primitives";
+	if ( !cloner.ClonePrimitives( destWorldspawn, sourceWorldspawn ) ) {
+		status = "could not copy source worldspawn primitives";
 		return false;
 	}
 	return true;
 }
 
-bool mapgenMapJoiner::DuplicateEntities( idStr &status ) {
-	for ( int i = 1; i < originalNumEntities; i++ ) {
-		mapgenEntityDuplicator duplicator( mapFile.GetEntity( i ), secondInstanceTransform, secondInstanceNames );
+bool mapgenMapJoiner::CopyEntities( idStr &status ) {
+	for ( int i = 1; i < sourceMap.GetNumEntities(); i++ ) {
+		mapgenEntityDuplicator duplicator( sourceMap.GetEntity( i ), transform, sourceNames );
 		idMapEntity *clonedEntity = duplicator.Clone();
 		if ( clonedEntity == NULL ) {
-			status = va( "could not duplicate entity %d primitives", i );
+			status = va( "could not copy source entity %d primitives", i );
 			return false;
 		}
-		mapFile.AddEntity( clonedEntity );
+		destMap.AddEntity( clonedEntity );
 	}
 	return true;
-}
-
-void mapgenMapJoiner::RenameFirstInstance( void ) {
-	for ( int i = 1; i < originalNumEntities; i++ ) {
-		firstInstanceNames.Apply( mapFile.GetEntity( i )->epairs );
-	}
 }
 
 idVec3 mapgenMapJoiner::GetEntityOrigin( const idMapEntity *mapEnt ) const {
@@ -868,88 +958,150 @@ idVec3 mapgenMapJoiner::GetEntityOrigin( const idMapEntity *mapEnt ) const {
 }
 
 mapgenDMapJob::mapgenDMapJob() :
-	mapFile(),
-	inputMapName(),
+	outputMap(),
+	firstMapNumEntities( 0 ),
 	status() {
 }
 
-bool mapgenDMapJob::Run( const char *sourceMapName, idStr &outputMapName, idStr &status ) {
-	bool result = Generate( sourceMapName, outputMapName );
+bool mapgenDMapJob::Run( const char *planName, idStr &outputMapName, idStr &status ) {
+	bool result = Generate( planName, outputMapName );
 
 	status = this->status;
 	return result;
 }
 
-bool mapgenDMapJob::Generate( const char *sourceMapName, idStr &outputMapName ) {
-	NormalizeInputMapName( sourceMapName );
-	if ( !ParseMap() ) {
+bool mapgenDMapJob::Generate( const char *planName, idStr &outputMapName ) {
+	mapgenJoinPlan plan;
+	if ( !plan.Load( planName, status ) ) {
 		return false;
 	}
 
-	mapgenSlot slot;
-	if ( !FindSlot( slot ) ) {
+	if ( plan.NumMaps() <= 0 ) {
+		status = va( "mapgen plan '%s' has no maps", planName );
 		return false;
 	}
 
-	mapgenMapJoiner joiner( mapFile, slot );
-	if ( !joiner.Join( status ) ) {
+	if ( !ParseMap( plan.Map( 0 ).MapName(), outputMap ) ) {
 		return false;
 	}
+	firstMapNumEntities = outputMap.GetNumEntities();
+
+	for ( int i = 0; i < plan.NumJoins(); i++ ) {
+		if ( !ApplyJoin( plan, plan.Join( i ) ) ) {
+			return false;
+		}
+	}
+	PrefixFirstMapEntities( plan.Map( 0 ).Prefix() );
 
 	if ( !WriteOutputMap( outputMapName ) ) {
 		return false;
 	}
 
-	SetSuccessStatus( slot );
+	SetSuccessStatus( planName, plan.NumJoins() );
 	return true;
 }
 
-void mapgenDMapJob::NormalizeInputMapName( const char *sourceMapName ) {
-	inputMapName = sourceMapName;
-	inputMapName.BackSlashesToSlashes();
-	inputMapName.StripFileExtension();
+idStr mapgenDMapJob::NormalizeMapName( const char *mapName ) const {
+	idStr normalizedName = mapName;
+	normalizedName.BackSlashesToSlashes();
+	normalizedName.StripFileExtension();
 
-	if ( inputMapName.Icmpn( "maps/", 5 ) != 0 ) {
-		inputMapName = "maps/" + inputMapName;
+	if ( normalizedName.Icmpn( "maps/", 5 ) != 0 ) {
+		normalizedName = "maps/" + normalizedName;
 	}
+	return normalizedName;
 }
 
-bool mapgenDMapJob::ParseMap( void ) {
-	if ( !mapFile.Parse( inputMapName, true ) ) {
-		status = va( "could not parse '%s.map'", inputMapName.c_str() );
+bool mapgenDMapJob::ParseMap( const char *mapName, idMapFile &mapFile ) {
+	idStr normalizedName = NormalizeMapName( mapName );
+	if ( !mapFile.Parse( normalizedName, true ) ) {
+		status = va( "could not parse '%s.map'", normalizedName.c_str() );
 		return false;
 	}
 
 	if ( mapFile.GetNumEntities() <= 0 ) {
-		status = "map has no worldspawn";
+		status = va( "map '%s.map' has no worldspawn", normalizedName.c_str() );
 		return false;
 	}
 
 	return true;
 }
 
-bool mapgenDMapJob::FindSlot( mapgenSlot &slot ) {
-	mapgenSlotFinder finder( mapFile, MAPGEN_HARDCODED_SLOT_NAME );
-	return finder.Find( slot, status );
+bool mapgenDMapJob::FindSlot( const idMapFile &mapFile, const char *mapName, const char *slotName, mapgenSlot &slot ) {
+	mapgenSlotFinder finder( mapFile, slotName );
+	if ( finder.Find( slot, status ) ) {
+		return true;
+	}
+
+	idStr slotStatus = status;
+	status = va( "map '%s': %s", mapName, slotStatus.c_str() );
+	return false;
+}
+
+bool mapgenDMapJob::ApplyJoin( const mapgenJoinPlan &plan, const mapgenJoinPlanJoin &join ) {
+	if ( join.SourceMapIndex() < 0 || join.SourceMapIndex() >= plan.NumMaps() || join.DestMapIndex() < 0 || join.DestMapIndex() >= plan.NumMaps() ) {
+		status = "mapgen plan join has an invalid map index";
+		return false;
+	}
+	if ( join.DestMapIndex() != 0 ) {
+		status = "mapgen plan joins must currently target the first map instance";
+		return false;
+	}
+
+	const mapgenJoinPlanMap &sourcePlanMap = plan.Map( join.SourceMapIndex() );
+	const mapgenJoinPlanMap &destPlanMap = plan.Map( join.DestMapIndex() );
+	idMapFile sourceMap;
+	if ( !ParseMap( sourcePlanMap.MapName(), sourceMap ) ) {
+		return false;
+	}
+
+	mapgenSlot sourceSlot;
+	if ( !FindSlot( sourceMap, sourcePlanMap.MapName(), join.SourceSlotName(), sourceSlot ) ) {
+		return false;
+	}
+
+	mapgenSlot destSlot;
+	if ( !FindSlot( outputMap, destPlanMap.MapName(), join.DestSlotName(), destSlot ) ) {
+		return false;
+	}
+
+	mapgenMapJoiner joiner( outputMap, sourceMap, sourceSlot, destSlot, sourcePlanMap.Prefix() );
+	if ( joiner.Join( status ) ) {
+		return true;
+	}
+
+	idStr joinStatus = status;
+	status = va( "could not join %s:%s to %s:%s: %s", sourcePlanMap.MapName(), join.SourceSlotName(), destPlanMap.MapName(), join.DestSlotName(), joinStatus.c_str() );
+	return false;
+}
+
+void mapgenDMapJob::PrefixFirstMapEntities( const char *prefix ) {
+	mapgenNameRemapper firstMapNames;
+	firstMapNames.Build( outputMap, firstMapNumEntities, prefix );
+
+	for ( int i = 1; i < firstMapNumEntities; i++ ) {
+		firstMapNames.Apply( outputMap.GetEntity( i )->epairs );
+	}
 }
 
 bool mapgenDMapJob::WriteOutputMap( idStr &outputMapName ) {
 	idStr outputMapBase = MAPGEN_OUTPUT_MAP;
-	outputMapName = outputMapBase;
-	outputMapName.SetFileExtension( "map" );
+	idStr outputPath = outputMapBase;
+	outputPath.SetFileExtension( "map" );
 
-	if ( !mapFile.Write( outputMapBase, ".map" ) ) {
-		status = va( "could not write '%s'", outputMapName.c_str() );
+	if ( !outputMap.Write( outputMapBase, ".map" ) ) {
+		status = va( "could not write '%s'", outputPath.c_str() );
 		return false;
 	}
+	outputMapName = outputPath;
 	return true;
 }
 
-void mapgenDMapJob::SetSuccessStatus( const mapgenSlot &slot ) {
-	status = va( "joined %s as %s%s to %s%s using entity %d primitive %d side %d", MAPGEN_HARDCODED_SLOT_NAME, MAPGEN_FIRST_INSTANCE_PREFIX, MAPGEN_HARDCODED_SLOT_NAME, MAPGEN_SECOND_INSTANCE_PREFIX, MAPGEN_HARDCODED_SLOT_NAME, slot.EntityNum(), slot.PrimitiveNum(), slot.SideNum() );
+void mapgenDMapJob::SetSuccessStatus( const char *planName, int numJoins ) {
+	status = va( "generated plan '%s' with %d joins", planName, numJoins );
 }
 
-bool MapGen_DMap( const char *sourceMapName, idStr &outputMapName, idStr &status ) {
+bool MapGen_DMap( const char *planName, idStr &outputMapName, idStr &status ) {
 	mapgenDMapJob job;
-	return job.Run( sourceMapName, outputMapName, status );
+	return job.Run( planName, outputMapName, status );
 }

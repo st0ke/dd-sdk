@@ -31,6 +31,6 @@ If you have questions concerning this license or the applicable additional terms
 
 class idStr;
 
-bool MapGen_DMap( const char *sourceMapName, idStr &outputMapName, idStr &status );
+bool MapGen_DMap( const char *planName, idStr &outputMapName, idStr &status );
 
 #endif /* !__GAME_MAPGEN_H__ */

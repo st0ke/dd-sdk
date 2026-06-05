@@ -296,8 +296,13 @@ private:
 
 class TestFileSystem : public idFileSystem {
 public:
+	TestFileSystem() : failWrites( false ) {}
+
 	void AddFile( const char *path, const char *contents ) {
 		files[path] = contents;
+	}
+	void SetFailWrites( bool fail ) {
+		failWrites = fail;
 	}
 
 	const char *GetFileContents( const char *path ) const {
@@ -352,6 +357,9 @@ public:
 		return it == files.end() ? NULL : new TestFile( relativePath, it->second, false );
 	}
 	virtual idFile *OpenFileWrite( const char *relativePath, const char *basePath = "fs_savepath" ) {
+		if ( failWrites ) {
+			return NULL;
+		}
 		return new TestFile( relativePath, "", true );
 	}
 	virtual idFile *OpenFileAppend( const char *filename, bool sync = false, const char *basePath = "fs_basepath" ) { return NULL; }
@@ -397,312 +405,261 @@ public:
 
 private:
 	std::map<std::string, std::string> files;
+	bool failWrites;
 };
 
-static const char *MAPGEN_SMOKE_MAP =
+static const char *MAPGEN_GATE2_MAP =
 	"Version 2\n"
-	"// entity 0\n"
 	"{\n"
 	"\"classname\" \"worldspawn\"\n"
+	"{\n"
+	" brushDef3\n"
+	" {\n"
+	"  ( 1 0 0 -32 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
+	"  ( -1 0 0 -32 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
+	"  ( 0 1 0 -32 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
+	"  ( 0 -1 0 -32 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
+	"  ( 0 0 1 -32 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
+	"  ( 0 0 -1 -32 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
+	" }\n"
 	"}\n"
-	"// entity 1\n"
+	"}\n"
 	"{\n"
 	"\"classname\" \"func_static\"\n"
 	"\"name\" \"slot_0\"\n"
+	"\"model\" \"slot_0\"\n"
 	"\"origin\" \"0 0 0\"\n"
 	"{\n"
 	" brushDef3\n"
 	" {\n"
 	"  ( 1 0 0 0 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/mapgen_slot\" 0 0 0\n"
 	"  ( -1 0 0 -16 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
-	"  ( 0 1 0 -64 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
-	"  ( 0 -1 0 -64 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
-	"  ( 0 0 1 -64 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
-	"  ( 0 0 -1 -64 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
+	"  ( 0 1 0 -32 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
+	"  ( 0 -1 0 -32 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
+	"  ( 0 0 1 -32 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
+	"  ( 0 0 -1 -32 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
 	" }\n"
 	"}\n"
 	"}\n"
-	"// entity 2\n"
 	"{\n"
 	"\"classname\" \"info_null\"\n"
-	"\"name\" \"marker\"\n"
-	"\"target\" \"marker\"\n"
-	"\"guiTarget\" \"marker\"\n"
-	"\"buddy\" \"marker\"\n"
-	"\"syncLock\" \"marker\"\n"
-	"\"cameraTarget\" \"marker\"\n"
-	"\"bind\" \"marker\"\n"
-	"\"team\" \"door_team\"\n"
-	"\"angle\" \"90\"\n"
-	"\"movedir\" \"0\"\n"
-	"\"rotation\" \"1 0 0 0 1 0 0 0 1\"\n"
-	"\"light_rotation\" \"1 0 0 0 1 0 0 0 1\"\n"
-	"\"light_origin\" \"64 16 8\"\n"
-	"\"light_target\" \"1 2 3\"\n"
-	"\"light_right\" \"4 5 6\"\n"
-	"\"light_up\" \"7 8 9\"\n"
-	"\"light_start\" \"10 11 12\"\n"
-	"\"light_end\" \"13 14 15\"\n"
-	"\"light_center\" \"16 17 18\"\n"
+	"\"name\" \"gate_marker\"\n"
+	"\"model\" \"models/mapobjects/test.lwo\"\n"
+	"\"target\" \"gate_marker\"\n"
+	"\"team\" \"gate_team\"\n"
+	"\"angle\" \"0\"\n"
 	"\"origin\" \"64 0 0\"\n"
 	"}\n";
 
-static const char *MAPGEN_HORIZONTAL_SLOT_MAP =
+static const char *MAPGEN_TESTGG_MAP =
 	"Version 2\n"
-	"// entity 0\n"
 	"{\n"
 	"\"classname\" \"worldspawn\"\n"
-	"}\n"
-	"// entity 1\n"
-	"{\n"
-	"\"classname\" \"func_static\"\n"
-	"\"name\" \"slot_0\"\n"
-	"\"origin\" \"0 0 0\"\n"
 	"{\n"
 	" brushDef3\n"
 	" {\n"
-	"  ( 0 0 1 0 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/mapgen_slot\" 0 0 0\n"
-	"  ( 0 0 -1 -16 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
-	"  ( 1 0 0 -64 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
-	"  ( -1 0 0 -64 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
-	"  ( 0 1 0 -64 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
-	"  ( 0 -1 0 -64 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
-	" }\n"
-	"}\n"
-	"}\n"
-	"// entity 2\n"
-	"{\n"
-	"\"classname\" \"info_null\"\n"
-	"\"name\" \"marker\"\n"
-	"\"movedir\" \"-1\"\n"
-	"\"origin\" \"0 0 64\"\n"
-	"}\n";
-
-static const char *MAPGEN_OFFSET_SLOT_MAP =
-	"Version 2\n"
-	"// entity 0\n"
-	"{\n"
-	"\"classname\" \"worldspawn\"\n"
-	"}\n"
-	"// entity 1\n"
-	"{\n"
-	"\"classname\" \"func_static\"\n"
-	"\"name\" \"slot_0\"\n"
-	"\"origin\" \"128 256 0\"\n"
-	"{\n"
-	" brushDef3\n"
-	" {\n"
-	"  ( 0 1 0 0 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/mapgen_slot\" 0 0 0\n"
-	"  ( 0 -1 0 -8 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
 	"  ( 1 0 0 -16 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
 	"  ( -1 0 0 -16 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
+	"  ( 0 1 0 -16 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
+	"  ( 0 -1 0 -16 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
 	"  ( 0 0 1 -16 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
 	"  ( 0 0 -1 -16 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
 	" }\n"
 	"}\n"
-	"}\n";
-
-static const char *MAPGEN_BAD_SLOT_BRUSH_MAP =
-	"Version 2\n"
-	"// entity 0\n"
-	"{\n"
-	"\"classname\" \"worldspawn\"\n"
 	"}\n"
-	"// entity 1\n"
 	"{\n"
 	"\"classname\" \"func_static\"\n"
-	"\"name\" \"slot_0\"\n"
-	"\"origin\" \"0 0 0\"\n"
+	"\"name\" \"slot_gg0\"\n"
+	"\"model\" \"slot_gg0\"\n"
+	"\"origin\" \"256 0 0\"\n"
+	"{\n"
+	" brushDef3\n"
+	" {\n"
+	"  ( -1 0 0 0 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/mapgen_slot\" 0 0 0\n"
+	"  ( 1 0 0 -16 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
+	"  ( 0 1 0 -32 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
+	"  ( 0 -1 0 -32 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
+	"  ( 0 0 1 -32 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
+	"  ( 0 0 -1 -32 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
+	" }\n"
+	"}\n"
+	"}\n"
+	"{\n"
+	"\"classname\" \"func_static\"\n"
+	"\"name\" \"slot_gg1\"\n"
+	"\"model\" \"slot_gg1\"\n"
+	"\"origin\" \"-256 0 0\"\n"
 	"{\n"
 	" brushDef3\n"
 	" {\n"
 	"  ( 1 0 0 0 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/mapgen_slot\" 0 0 0\n"
 	"  ( -1 0 0 -16 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
-	"  ( 0 1 0 -64 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
-	"  ( 0 -1 0 -64 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
-	"  ( 0 0 1 -64 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
+	"  ( 0 1 0 -32 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
+	"  ( 0 -1 0 -32 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
+	"  ( 0 0 1 -32 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
+	"  ( 0 0 -1 -32 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
 	" }\n"
 	"}\n"
+	"}\n"
+	"{\n"
+	"\"classname\" \"info_null\"\n"
+	"\"name\" \"testgg_marker\"\n"
+	"\"target\" \"testgg_marker\"\n"
+	"\"team\" \"testgg_team\"\n"
+	"\"origin\" \"0 64 0\"\n"
 	"}\n";
 
-static const char *MAPGEN_MULTIPLE_SLOT_FACES_MAP =
+static const char *MAPGEN_TESTGG_MISSING_SLOT_MAP =
 	"Version 2\n"
-	"// entity 0\n"
 	"{\n"
 	"\"classname\" \"worldspawn\"\n"
 	"}\n"
-	"// entity 1\n"
 	"{\n"
 	"\"classname\" \"func_static\"\n"
-	"\"name\" \"slot_0\"\n"
-	"\"origin\" \"0 0 0\"\n"
+	"\"name\" \"slot_gg0\"\n"
+	"\"origin\" \"256 0 0\"\n"
 	"{\n"
 	" brushDef3\n"
 	" {\n"
-	"  ( 1 0 0 0 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/mapgen_slot\" 0 0 0\n"
-	"  ( -1 0 0 -16 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/mapgen_slot\" 0 0 0\n"
-	"  ( 0 1 0 -64 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
-	"  ( 0 -1 0 -64 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
-	"  ( 0 0 1 -64 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
-	"  ( 0 0 -1 -64 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
+	"  ( -1 0 0 0 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/mapgen_slot\" 0 0 0\n"
+	"  ( 1 0 0 -16 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
+	"  ( 0 1 0 -32 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
+	"  ( 0 -1 0 -32 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
+	"  ( 0 0 1 -32 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
+	"  ( 0 0 -1 -32 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
 	" }\n"
 	"}\n"
 	"}\n";
 
-static void RunMapGenSmokeTest( TestFileSystem &testFileSystem ) {
-	testFileSystem.AddFile( "maps/mapgen_smoke.map", MAPGEN_SMOKE_MAP );
+static void AddGate2TestggFiles( TestFileSystem &testFileSystem ) {
+	testFileSystem.AddFile( "maps/mapgen/gate2.map", MAPGEN_GATE2_MAP );
+	testFileSystem.AddFile( "maps/mapgen/testgg.map", MAPGEN_TESTGG_MAP );
+}
+
+static void RunMapGenJoinPlanTest( TestFileSystem &testFileSystem ) {
+	testFileSystem.RemoveFile( "maps/mapgen/current.map" );
+	AddGate2TestggFiles( testFileSystem );
 
 	idStr outputMapName;
 	idStr status;
-	Expect( MapGen_DMap( "mapgen_smoke", outputMapName, status ), status.c_str() );
+	Expect( MapGen_DMap( "gate2_testgg", outputMapName, status ), status.c_str() );
 	ExpectString( outputMapName.c_str(), "maps/mapgen/current.map", "unexpected output map path" );
-	Expect( testFileSystem.GetFileContents( "maps/mapgen/current.map" ) != NULL, "output map was not written" );
+	ExpectContains( status.c_str(), "2 joins", "unexpected success status" );
 
 	idMapFile generatedMap;
-	Expect( generatedMap.Parse( "maps/mapgen/current", true ), "generated map could not be parsed" );
-	Expect( generatedMap.GetNumEntities() == 5, "expected two prefixed map instances" );
+	Expect( generatedMap.Parse( "maps/mapgen/current", true ), "generated join-plan map could not be parsed" );
+	Expect( generatedMap.GetNumEntities() == 8, "expected testgg and two gate instances" );
+	Expect( generatedMap.GetEntity( 0 )->GetNumPrimitives() == 3, "expected merged worldspawn primitives from all instances" );
 
-	idMapEntity *firstSlot = generatedMap.GetEntity( 1 );
-	idMapEntity *firstMarker = generatedMap.GetEntity( 2 );
-	idMapEntity *secondSlot = generatedMap.GetEntity( 3 );
-	idMapEntity *secondMarker = generatedMap.GetEntity( 4 );
+	idMapEntity *testggMarker = generatedMap.FindEntity( "m0__testgg_marker" );
+	idMapEntity *firstSlot = generatedMap.FindEntity( "m1__slot_0" );
+	idMapEntity *firstMarker = generatedMap.FindEntity( "m1__gate_marker" );
+	idMapEntity *secondSlot = generatedMap.FindEntity( "m2__slot_0" );
+	idMapEntity *secondMarker = generatedMap.FindEntity( "m2__gate_marker" );
+	Expect( testggMarker != NULL, "missing prefixed testgg marker" );
+	Expect( firstSlot != NULL && firstMarker != NULL, "missing first gate instance" );
+	Expect( secondSlot != NULL && secondMarker != NULL, "missing second gate instance" );
+	Expect( generatedMap.FindEntity( "m0__slot_gg0" ) != NULL, "missing first prefixed destination slot" );
+	Expect( generatedMap.FindEntity( "m0__slot_gg1" ) != NULL, "missing second prefixed destination slot" );
+	ExpectString( generatedMap.FindEntity( "m0__slot_gg0" )->epairs.GetString( "model" ), "m0__slot_gg0", "unexpected first destination slot model" );
+	ExpectString( generatedMap.FindEntity( "m0__slot_gg1" )->epairs.GetString( "model" ), "m0__slot_gg1", "unexpected second destination slot model" );
+	ExpectString( firstSlot->epairs.GetString( "model" ), "m1__slot_0", "unexpected first gate slot model" );
+	ExpectString( secondSlot->epairs.GetString( "model" ), "m2__slot_0", "unexpected second gate slot model" );
 
-	ExpectString( firstSlot->epairs.GetString( "name" ), "m0__slot_0", "unexpected first slot name" );
-	ExpectString( firstMarker->epairs.GetString( "name" ), "m0__marker", "unexpected first marker name" );
-	ExpectString( secondSlot->epairs.GetString( "name" ), "m1__slot_0", "unexpected second slot name" );
-	ExpectString( secondMarker->epairs.GetString( "name" ), "m1__marker", "unexpected second marker name" );
+	ExpectString( testggMarker->epairs.GetString( "target" ), "m0__testgg_marker", "unexpected testgg target" );
+	ExpectString( testggMarker->epairs.GetString( "team" ), "m0__testgg_team", "unexpected testgg team" );
+	ExpectString( firstMarker->epairs.GetString( "target" ), "m1__gate_marker", "unexpected first gate target" );
+	ExpectString( firstMarker->epairs.GetString( "team" ), "m1__gate_team", "unexpected first gate team" );
+	ExpectString( firstMarker->epairs.GetString( "model" ), "models/mapobjects/test.lwo", "external model path was unexpectedly prefixed" );
+	ExpectString( secondMarker->epairs.GetString( "target" ), "m2__gate_marker", "unexpected second gate target" );
+	ExpectString( secondMarker->epairs.GetString( "team" ), "m2__gate_team", "unexpected second gate team" );
 
-	idMapBrush *rotatedSlotBrush = static_cast<idMapBrush *>( secondSlot->GetPrimitive( 0 ) );
-	bool foundRotatedSlotSide = false;
-	for ( int i = 0; i < rotatedSlotBrush->GetNumSides(); i++ ) {
-		idMapBrushSide *side = rotatedSlotBrush->GetSide( i );
-		if ( idStr::Icmp( side->GetMaterial(), "textures/common/mapgen_slot" ) != 0 ) {
-			continue;
-		}
-		foundRotatedSlotSide = true;
-		ExpectNear( side->GetPlane().Normal().x, -1.0f, 0.01f, "rotated slot normal x" );
-		ExpectNear( side->GetPlane().Dist(), 0.0f, 0.01f, "rotated slot plane distance" );
-	}
-	Expect( foundRotatedSlotSide, "rotated slot brush has no mapgen slot side" );
+	idVec3 firstSlotOrigin;
+	idVec3 firstMarkerOrigin;
+	idVec3 secondSlotOrigin;
+	idVec3 secondMarkerOrigin;
+	firstSlot->epairs.GetVector( "origin", "0 0 0", firstSlotOrigin );
+	firstMarker->epairs.GetVector( "origin", "0 0 0", firstMarkerOrigin );
+	secondSlot->epairs.GetVector( "origin", "0 0 0", secondSlotOrigin );
+	secondMarker->epairs.GetVector( "origin", "0 0 0", secondMarkerOrigin );
+	ExpectNear( firstSlotOrigin.x, 256.0f, 0.01f, "first gate slot origin x" );
+	ExpectNear( firstMarkerOrigin.x, 320.0f, 0.01f, "first gate marker origin x" );
+	ExpectNear( secondSlotOrigin.x, -256.0f, 0.01f, "second gate slot origin x" );
+	ExpectNear( secondMarkerOrigin.x, -320.0f, 0.01f, "second gate marker origin x" );
 
-	ExpectString( firstMarker->epairs.GetString( "target" ), "m0__marker", "unexpected first target" );
-	ExpectString( firstMarker->epairs.GetString( "team" ), "m0__door_team", "unexpected first team" );
-
-	ExpectString( secondMarker->epairs.GetString( "target" ), "m1__marker", "unexpected second target" );
-	ExpectString( secondMarker->epairs.GetString( "guiTarget" ), "m1__marker", "unexpected second guiTarget" );
-	ExpectString( secondMarker->epairs.GetString( "buddy" ), "m1__marker", "unexpected second buddy" );
-	ExpectString( secondMarker->epairs.GetString( "syncLock" ), "m1__marker", "unexpected second syncLock" );
-	ExpectString( secondMarker->epairs.GetString( "cameraTarget" ), "m1__marker", "unexpected second cameraTarget" );
-	ExpectString( secondMarker->epairs.GetString( "bind" ), "m1__marker", "unexpected second bind" );
-	ExpectString( secondMarker->epairs.GetString( "team" ), "m1__door_team", "unexpected second team" );
-
-	float movedir;
-	Expect( secondMarker->epairs.GetFloat( "movedir", "0", movedir ), "rotated movedir is missing" );
-	ExpectNear( movedir, 180.0f, 0.01f, "rotated movedir" );
-
-	float angle;
-	Expect( secondMarker->epairs.GetFloat( "angle", "0", angle ), "rotated angle is missing" );
-	ExpectNear( angle, 270.0f, 0.01f, "rotated angle" );
-
-	idMat3 rotation;
-	Expect( secondMarker->epairs.GetMatrix( "rotation", "", rotation ), "rotated rotation matrix is missing" );
-	ExpectNear( rotation[0].x, -1.0f, 0.01f, "rotated rotation x axis x" );
-	ExpectNear( rotation[1].y, -1.0f, 0.01f, "rotated rotation y axis y" );
-	ExpectNear( rotation[2].z, 1.0f, 0.01f, "rotated rotation z axis z" );
-
-	idMat3 lightRotation;
-	Expect( secondMarker->epairs.GetMatrix( "light_rotation", "", lightRotation ), "rotated light_rotation matrix is missing" );
-	ExpectNear( lightRotation[0].x, -1.0f, 0.01f, "rotated light_rotation x axis x" );
-	ExpectNear( lightRotation[1].y, -1.0f, 0.01f, "rotated light_rotation y axis y" );
-	ExpectNear( lightRotation[2].z, 1.0f, 0.01f, "rotated light_rotation z axis z" );
-
-	idVec3 lightOrigin;
-	secondMarker->epairs.GetVector( "light_origin", "0 0 0", lightOrigin );
-	ExpectNear( lightOrigin.x, -64.0f, 0.01f, "rotated light_origin x" );
-	ExpectNear( lightOrigin.y, -16.0f, 0.01f, "rotated light_origin y" );
-	ExpectNear( lightOrigin.z, 8.0f, 0.01f, "rotated light_origin z" );
-
-	idVec3 lightTarget;
-	secondMarker->epairs.GetVector( "light_target", "0 0 0", lightTarget );
-	ExpectNear( lightTarget.x, -1.0f, 0.01f, "rotated light_target x" );
-	ExpectNear( lightTarget.y, -2.0f, 0.01f, "rotated light_target y" );
-	ExpectNear( lightTarget.z, 3.0f, 0.01f, "rotated light_target z" );
-
-	idVec3 rotatedOrigin;
-	secondMarker->epairs.GetVector( "origin", "0 0 0", rotatedOrigin );
-	ExpectNear( rotatedOrigin.x, -64.0f, 0.01f, "rotated origin x" );
-	ExpectNear( rotatedOrigin.y, 0.0f, 0.01f, "rotated origin y" );
-	ExpectNear( rotatedOrigin.z, 0.0f, 0.01f, "rotated origin z" );
+	float secondAngle;
+	Expect( secondMarker->epairs.GetFloat( "angle", "0", secondAngle ), "second gate angle is missing" );
+	ExpectNear( secondAngle, 180.0f, 0.01f, "second gate angle" );
 }
 
-static void RunMapGenNonVerticalSlotTest( TestFileSystem &testFileSystem ) {
-	testFileSystem.RemoveFile( "maps/mapgen/current.map" );
-	testFileSystem.AddFile( "maps/mapgen_horizontal.map", MAPGEN_HORIZONTAL_SLOT_MAP );
-
+static void RunMapGenPlanFailureTests( TestFileSystem &testFileSystem ) {
 	idStr outputMapName;
 	idStr status;
+
+	testFileSystem.RemoveFile( "maps/mapgen/current.map" );
 	outputMapName = "previous_output.map";
-	Expect( !MapGen_DMap( "mapgen_horizontal", outputMapName, status ), "non-vertical slot unexpectedly succeeded" );
-	ExpectString( outputMapName.c_str(), "previous_output.map", "non-vertical slot changed output map path" );
-	ExpectContains( status.c_str(), "face must be vertical", "unexpected non-vertical slot status" );
-	Expect( testFileSystem.GetFileContents( "maps/mapgen/current.map" ) == NULL, "non-vertical slot wrote an output map" );
-}
+	Expect( !MapGen_DMap( "missing_plan", outputMapName, status ), "unknown plan unexpectedly succeeded" );
+	ExpectContains( status.c_str(), "unknown mapgen plan", "unexpected unknown-plan status" );
+	ExpectString( outputMapName.c_str(), "previous_output.map", "unknown plan changed output map path" );
 
-static void RunMapGenOffsetSlotAnchorTest( TestFileSystem &testFileSystem ) {
-	testFileSystem.RemoveFile( "maps/mapgen/current.map" );
-	testFileSystem.AddFile( "maps/mapgen_offset_slot.map", MAPGEN_OFFSET_SLOT_MAP );
-
-	idStr outputMapName;
-	idStr status;
-	Expect( MapGen_DMap( "mapgen_offset_slot", outputMapName, status ), status.c_str() );
-
-	idMapFile generatedMap;
-	Expect( generatedMap.Parse( "maps/mapgen/current", true ), "offset generated map could not be parsed" );
-	Expect( generatedMap.GetNumEntities() == 3, "expected duplicated offset slot entity" );
-
-	idMapEntity *firstSlot = generatedMap.GetEntity( 1 );
-	idMapEntity *secondSlot = generatedMap.GetEntity( 2 );
-
-	idVec3 firstOrigin;
-	idVec3 secondOrigin;
-	firstSlot->epairs.GetVector( "origin", "0 0 0", firstOrigin );
-	secondSlot->epairs.GetVector( "origin", "0 0 0", secondOrigin );
-	ExpectNear( secondOrigin.x, firstOrigin.x, 0.01f, "joined offset slot origin x" );
-	ExpectNear( secondOrigin.y, firstOrigin.y, 0.01f, "joined offset slot origin y" );
-	ExpectNear( secondOrigin.z, firstOrigin.z, 0.01f, "joined offset slot origin z" );
-
-	idMapBrush *firstBrush = static_cast<idMapBrush *>( firstSlot->GetPrimitive( 0 ) );
-	idMapBrush *secondBrush = static_cast<idMapBrush *>( secondSlot->GetPrimitive( 0 ) );
-	ExpectNear( firstBrush->GetSide( 0 )->GetPlane().Normal().y, 1.0f, 0.01f, "first offset slot normal y" );
-	ExpectNear( secondBrush->GetSide( 0 )->GetPlane().Normal().y, -1.0f, 0.01f, "second offset slot normal y" );
-	ExpectNear( secondBrush->GetSide( 0 )->GetPlane().Dist(), 0.0f, 0.01f, "second offset slot plane distance" );
-}
-
-static void RunMapGenIrregularSlotBrushTest( TestFileSystem &testFileSystem ) {
-	testFileSystem.RemoveFile( "maps/mapgen/current.map" );
-	testFileSystem.AddFile( "maps/mapgen_bad_slot.map", MAPGEN_BAD_SLOT_BRUSH_MAP );
-
-	idStr outputMapName;
-	idStr status;
-	outputMapName = "previous_output.map";
-	Expect( !MapGen_DMap( "mapgen_bad_slot", outputMapName, status ), "irregular slot brush unexpectedly succeeded" );
-	ExpectString( outputMapName.c_str(), "previous_output.map", "irregular slot brush changed output map path" );
-	ExpectContains( status.c_str(), "face must form a finite brush polygon", "unexpected irregular slot brush status" );
-	Expect( testFileSystem.GetFileContents( "maps/mapgen/current.map" ) == NULL, "irregular slot brush wrote an output map" );
-}
-
-static void RunMapGenInvalidSlotTests( TestFileSystem &testFileSystem ) {
-	idStr outputMapName;
-	idStr status;
-
+	testFileSystem.RemoveFile( "maps/mapgen/gate2.map" );
+	testFileSystem.AddFile( "maps/mapgen/testgg.map", MAPGEN_TESTGG_MAP );
 	status.Clear();
+	Expect( !MapGen_DMap( "gate2_testgg", outputMapName, status ), "missing source map unexpectedly succeeded" );
+	ExpectContains( status.c_str(), "maps/mapgen/gate2.map", "unexpected missing-source status" );
+
+	testFileSystem.AddFile( "maps/mapgen/gate2.map", MAPGEN_GATE2_MAP );
+	testFileSystem.AddFile( "maps/mapgen/testgg.map", MAPGEN_TESTGG_MISSING_SLOT_MAP );
+	status.Clear();
+	Expect( !MapGen_DMap( "gate2_testgg", outputMapName, status ), "missing destination slot unexpectedly succeeded" );
+	ExpectContains( status.c_str(), "slot_gg1", "unexpected missing-slot status" );
+	Expect( testFileSystem.GetFileContents( "maps/mapgen/current.map" ) == NULL, "failed plan wrote an output map" );
+
+	std::string horizontalGate = MAPGEN_GATE2_MAP;
+	std::string slotEntity = "\"name\" \"slot_0\"";
+	std::string verticalSide = "( 1 0 0 0 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/mapgen_slot\"";
+	std::string horizontalSide = "( 0 0 1 0 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/mapgen_slot\"";
+	std::string::size_type slotOffset = horizontalGate.find( slotEntity );
+	std::string::size_type sideOffset = horizontalGate.find( verticalSide, slotOffset );
+	Expect( slotOffset != std::string::npos && sideOffset != std::string::npos, "could not build horizontal gate fixture" );
+	horizontalGate.replace( sideOffset, verticalSide.size(), horizontalSide );
+	testFileSystem.AddFile( "maps/mapgen/testgg.map", MAPGEN_TESTGG_MAP );
+	testFileSystem.AddFile( "maps/mapgen/gate2.map", horizontalGate.c_str() );
+	status.Clear();
+	Expect( !MapGen_DMap( "gate2_testgg", outputMapName, status ), "horizontal source slot unexpectedly succeeded" );
+	ExpectContains( status.c_str(), "face must be vertical", "unexpected horizontal-slot status" );
+
+	std::string multipleFaceGate = MAPGEN_GATE2_MAP;
+	std::string oppositeSide = "( -1 0 0 -16 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\"";
+	std::string secondSlotSide = "( -1 0 0 -16 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/mapgen_slot\"";
+	slotOffset = multipleFaceGate.find( slotEntity );
+	sideOffset = multipleFaceGate.find( oppositeSide, slotOffset );
+	Expect( slotOffset != std::string::npos && sideOffset != std::string::npos, "could not build multiple-face gate fixture" );
+	multipleFaceGate.replace( sideOffset, oppositeSide.size(), secondSlotSide );
+	testFileSystem.AddFile( "maps/mapgen/gate2.map", multipleFaceGate.c_str() );
+	status.Clear();
+	Expect( !MapGen_DMap( "gate2_testgg", outputMapName, status ), "multiple source slot faces unexpectedly succeeded" );
+	ExpectContains( status.c_str(), "multiple 'textures/common/mapgen_slot' faces", "unexpected multiple-face status" );
+
+	std::string openSlotGate = MAPGEN_GATE2_MAP;
+	std::string missingSide = "  ( 0 0 -1 -32 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n";
+	slotOffset = openSlotGate.find( slotEntity );
+	sideOffset = openSlotGate.find( missingSide, slotOffset );
+	Expect( slotOffset != std::string::npos && sideOffset != std::string::npos, "could not build open-slot gate fixture" );
+	openSlotGate.erase( sideOffset, missingSide.size() );
+	testFileSystem.AddFile( "maps/mapgen/gate2.map", openSlotGate.c_str() );
+	status.Clear();
+	Expect( !MapGen_DMap( "gate2_testgg", outputMapName, status ), "open source slot brush unexpectedly succeeded" );
+	ExpectContains( status.c_str(), "face must form a finite brush polygon", "unexpected open-slot status" );
+
+	AddGate2TestggFiles( testFileSystem );
+	testFileSystem.SetFailWrites( true );
 	outputMapName = "previous_output.map";
-	testFileSystem.RemoveFile( "maps/mapgen/current.map" );
-	testFileSystem.AddFile( "maps/mapgen_multiple_slot_faces.map", MAPGEN_MULTIPLE_SLOT_FACES_MAP );
-	Expect( !MapGen_DMap( "mapgen_multiple_slot_faces", outputMapName, status ), "multiple slot faces unexpectedly succeeded" );
-	ExpectString( outputMapName.c_str(), "previous_output.map", "multiple slot faces changed output map path" );
-	ExpectContains( status.c_str(), "multiple 'textures/common/mapgen_slot' faces", "unexpected multiple slot faces status" );
-	Expect( testFileSystem.GetFileContents( "maps/mapgen/current.map" ) == NULL, "multiple slot faces wrote an output map" );
+	status.Clear();
+	Expect( !MapGen_DMap( "gate2_testgg", outputMapName, status ), "output write failure unexpectedly succeeded" );
+	testFileSystem.SetFailWrites( false );
+	ExpectContains( status.c_str(), "could not write", "unexpected write-failure status" );
+	ExpectString( outputMapName.c_str(), "previous_output.map", "write failure changed output map path" );
 }
 
 int main( int argc, char **argv ) {
@@ -718,11 +675,8 @@ int main( int argc, char **argv ) {
 	try {
 		idLib::Init();
 		idLibInitialized = true;
-		RunMapGenSmokeTest( testFileSystem );
-		RunMapGenNonVerticalSlotTest( testFileSystem );
-		RunMapGenOffsetSlotAnchorTest( testFileSystem );
-		RunMapGenIrregularSlotBrushTest( testFileSystem );
-		RunMapGenInvalidSlotTests( testFileSystem );
+		RunMapGenJoinPlanTest( testFileSystem );
+		RunMapGenPlanFailureTests( testFileSystem );
 	} catch ( const std::exception &ex ) {
 		if ( idLibInitialized ) {
 			idLib::ShutDown();

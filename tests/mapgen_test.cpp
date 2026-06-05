@@ -478,6 +478,30 @@ static const char *MAPGEN_HORIZONTAL_SLOT_MAP =
 	"\"origin\" \"0 0 64\"\n"
 	"}\n";
 
+static const char *MAPGEN_OFFSET_SLOT_MAP =
+	"Version 2\n"
+	"// entity 0\n"
+	"{\n"
+	"\"classname\" \"worldspawn\"\n"
+	"}\n"
+	"// entity 1\n"
+	"{\n"
+	"\"classname\" \"func_static\"\n"
+	"\"name\" \"slot_0\"\n"
+	"\"origin\" \"128 256 0\"\n"
+	"{\n"
+	" brushDef3\n"
+	" {\n"
+	"  ( 0 1 0 0 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/mapgen_slot\" 0 0 0\n"
+	"  ( 0 -1 0 -8 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
+	"  ( 1 0 0 -16 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
+	"  ( -1 0 0 -16 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
+	"  ( 0 0 1 -16 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
+	"  ( 0 0 -1 -16 ) ( ( 0.03125 0 0 ) ( 0 0.03125 0 ) ) \"textures/common/caulk\" 0 0 0\n"
+	" }\n"
+	"}\n"
+	"}\n";
+
 static const char *MAPGEN_BAD_SLOT_BRUSH_MAP =
 	"Version 2\n"
 	"// entity 0\n"
@@ -617,9 +641,41 @@ static void RunMapGenNonVerticalSlotTest( TestFileSystem &testFileSystem ) {
 
 	idStr outputMapName;
 	idStr status;
+	outputMapName = "previous_output.map";
 	Expect( !MapGen_DMap( "mapgen_horizontal", outputMapName, status ), "non-vertical slot unexpectedly succeeded" );
+	ExpectString( outputMapName.c_str(), "previous_output.map", "non-vertical slot changed output map path" );
 	ExpectContains( status.c_str(), "face must be vertical", "unexpected non-vertical slot status" );
 	Expect( testFileSystem.GetFileContents( "maps/mapgen/current.map" ) == NULL, "non-vertical slot wrote an output map" );
+}
+
+static void RunMapGenOffsetSlotAnchorTest( TestFileSystem &testFileSystem ) {
+	testFileSystem.RemoveFile( "maps/mapgen/current.map" );
+	testFileSystem.AddFile( "maps/mapgen_offset_slot.map", MAPGEN_OFFSET_SLOT_MAP );
+
+	idStr outputMapName;
+	idStr status;
+	Expect( MapGen_DMap( "mapgen_offset_slot", outputMapName, status ), status.c_str() );
+
+	idMapFile generatedMap;
+	Expect( generatedMap.Parse( "maps/mapgen/current", true ), "offset generated map could not be parsed" );
+	Expect( generatedMap.GetNumEntities() == 3, "expected duplicated offset slot entity" );
+
+	idMapEntity *firstSlot = generatedMap.GetEntity( 1 );
+	idMapEntity *secondSlot = generatedMap.GetEntity( 2 );
+
+	idVec3 firstOrigin;
+	idVec3 secondOrigin;
+	firstSlot->epairs.GetVector( "origin", "0 0 0", firstOrigin );
+	secondSlot->epairs.GetVector( "origin", "0 0 0", secondOrigin );
+	ExpectNear( secondOrigin.x, firstOrigin.x, 0.01f, "joined offset slot origin x" );
+	ExpectNear( secondOrigin.y, firstOrigin.y, 0.01f, "joined offset slot origin y" );
+	ExpectNear( secondOrigin.z, firstOrigin.z, 0.01f, "joined offset slot origin z" );
+
+	idMapBrush *firstBrush = static_cast<idMapBrush *>( firstSlot->GetPrimitive( 0 ) );
+	idMapBrush *secondBrush = static_cast<idMapBrush *>( secondSlot->GetPrimitive( 0 ) );
+	ExpectNear( firstBrush->GetSide( 0 )->GetPlane().Normal().y, 1.0f, 0.01f, "first offset slot normal y" );
+	ExpectNear( secondBrush->GetSide( 0 )->GetPlane().Normal().y, -1.0f, 0.01f, "second offset slot normal y" );
+	ExpectNear( secondBrush->GetSide( 0 )->GetPlane().Dist(), 0.0f, 0.01f, "second offset slot plane distance" );
 }
 
 static void RunMapGenIrregularSlotBrushTest( TestFileSystem &testFileSystem ) {
@@ -628,26 +684,11 @@ static void RunMapGenIrregularSlotBrushTest( TestFileSystem &testFileSystem ) {
 
 	idStr outputMapName;
 	idStr status;
-	Expect( MapGen_DMap( "mapgen_bad_slot", outputMapName, status ), status.c_str() );
-	Expect( testFileSystem.GetFileContents( "maps/mapgen/current.map" ) != NULL, "irregular slot brush did not write an output map" );
-
-	idMapFile generatedMap;
-	Expect( generatedMap.Parse( "maps/mapgen/current", true ), "irregular generated map could not be parsed" );
-	Expect( generatedMap.GetNumEntities() == 3, "expected duplicated irregular slot entity" );
-
-	idMapEntity *secondSlot = generatedMap.GetEntity( 2 );
-	idMapBrush *rotatedSlotBrush = static_cast<idMapBrush *>( secondSlot->GetPrimitive( 0 ) );
-	bool foundRotatedSlotSide = false;
-	for ( int i = 0; i < rotatedSlotBrush->GetNumSides(); i++ ) {
-		idMapBrushSide *side = rotatedSlotBrush->GetSide( i );
-		if ( idStr::Icmp( side->GetMaterial(), "textures/common/mapgen_slot" ) != 0 ) {
-			continue;
-		}
-		foundRotatedSlotSide = true;
-		ExpectNear( side->GetPlane().Normal().x, -1.0f, 0.01f, "irregular rotated slot normal x" );
-		ExpectNear( side->GetPlane().Dist(), 0.0f, 0.01f, "irregular rotated slot plane distance" );
-	}
-	Expect( foundRotatedSlotSide, "irregular rotated slot brush has no mapgen slot side" );
+	outputMapName = "previous_output.map";
+	Expect( !MapGen_DMap( "mapgen_bad_slot", outputMapName, status ), "irregular slot brush unexpectedly succeeded" );
+	ExpectString( outputMapName.c_str(), "previous_output.map", "irregular slot brush changed output map path" );
+	ExpectContains( status.c_str(), "face must form a finite brush polygon", "unexpected irregular slot brush status" );
+	Expect( testFileSystem.GetFileContents( "maps/mapgen/current.map" ) == NULL, "irregular slot brush wrote an output map" );
 }
 
 static void RunMapGenInvalidSlotTests( TestFileSystem &testFileSystem ) {
@@ -655,10 +696,11 @@ static void RunMapGenInvalidSlotTests( TestFileSystem &testFileSystem ) {
 	idStr status;
 
 	status.Clear();
-	outputMapName.Clear();
+	outputMapName = "previous_output.map";
 	testFileSystem.RemoveFile( "maps/mapgen/current.map" );
 	testFileSystem.AddFile( "maps/mapgen_multiple_slot_faces.map", MAPGEN_MULTIPLE_SLOT_FACES_MAP );
 	Expect( !MapGen_DMap( "mapgen_multiple_slot_faces", outputMapName, status ), "multiple slot faces unexpectedly succeeded" );
+	ExpectString( outputMapName.c_str(), "previous_output.map", "multiple slot faces changed output map path" );
 	ExpectContains( status.c_str(), "multiple 'textures/common/mapgen_slot' faces", "unexpected multiple slot faces status" );
 	Expect( testFileSystem.GetFileContents( "maps/mapgen/current.map" ) == NULL, "multiple slot faces wrote an output map" );
 }
@@ -678,6 +720,7 @@ int main( int argc, char **argv ) {
 		idLibInitialized = true;
 		RunMapGenSmokeTest( testFileSystem );
 		RunMapGenNonVerticalSlotTest( testFileSystem );
+		RunMapGenOffsetSlotAnchorTest( testFileSystem );
 		RunMapGenIrregularSlotBrushTest( testFileSystem );
 		RunMapGenInvalidSlotTests( testFileSystem );
 	} catch ( const std::exception &ex ) {

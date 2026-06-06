@@ -1,0 +1,51 @@
+
+---
+# Declare C++ language targeting
+Language: Cpp
+
+# Use WebKit as the closest base to typical Java syntax defaults
+BasedOnStyle: WebKit
+
+# Java defaults to 4 spaces for indentation
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+
+# Column limit matching standard modern IDE settings (like IntelliJ/Eclipse)
+ColumnLimit: 120
+
+# Core Java Brace Rule: Always attach opening braces to the surrounding context
+BreakBeforeBraces: Attach
+
+# Custom fine-tuning for specific structural braces
+BraceWrapping:
+  AfterClass: false
+  AfterControlStatement: Never
+  AfterEnum: false
+  AfterFunction: false
+  AfterNamespace: false
+  AfterObjCDeclaration: false
+  AfterStruct: false
+  AfterUnion: false
+  BeforeCatch: false
+  BeforeElse: false
+  IndentBraces: false
+  SplitEmptyFunction: false
+  SplitEmptyRecord: false
+  SplitEmptyNamespace: false
+
+# Java-style spacing configurations
+SpaceBeforeParens: ControlStatements # e.g., "if (condition)" but "myMethod()"
+SpaceAfterCStyleCast: true           # e.g., "(int) myValue"
+SpaceBeforeAssignmentOperators: true # e.g., "int x = 5;"
+
+# Keep single-line methods intact if they fit (common for Java getters/setters)
+AllowShortBlocksOnASingleLine: Always
+AllowShortFunctionsOnASingleLine: Inline
+
+# Ensure your access modifiers (public:, private:) match Java's inline feel
+AccessModifierOffset: -4
+
+# Additional cleanups
+SortIncludes: true
+...

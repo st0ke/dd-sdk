@@ -1,0 +1,25 @@
+// DD game project
+// Copyright (C) 2026 Alexander Boldyrev <boldir@gmail.com>
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program. If not, see https://www.gnu.org/licenses/.
+
+#ifndef __GAME_MAPGEN_CONSTANTS_H__
+#define __GAME_MAPGEN_CONSTANTS_H__
+
+static const float MAPGEN_PLANE_DIST_EPSILON = 0.001f;
+static const float MAPGEN_VERTICAL_SLOT_EPSILON = 0.001f;
+
+static const char* const MAPGEN_SLOT_MATERIAL = "textures/common/mapgen_slot";
+
+#endif /* !__GAME_MAPGEN_CONSTANTS_H__ */

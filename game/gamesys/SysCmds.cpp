@@ -41,7 +41,7 @@ If you have questions concerning this license or the applicable additional terms
 #include "WorldSpawn.h"
 #include "Fx.h"
 #include "Misc.h"
-#include "mapgen/MapGen.h"
+#include "mapgen/MapGenCmds.h"
 
 #include "SysCmds.h"
 
@@ -2279,25 +2279,30 @@ static void ArgCompletion_MapGenPlan( const idCmdArgs &args, void(*callback)( co
 
 /*
 ==================
-Cmd_MapGenDMap_f
+Cmd_MapGenJoin_f
 ==================
 */
-static void Cmd_MapGenDMap_f( const idCmdArgs &args ) {
+static void Cmd_MapGenJoin_f( const idCmdArgs &args ) {
 	idStr outputMapName;
 	idStr status;
 
-	if ( args.Argc() != 2 ) {
-		gameLocal.Printf( "usage: mapgen_dmap <plan>\n" );
+	if ( args.Argc() != 3 ) {
+		gameLocal.Printf( "usage: mapgen_join <plan> <output.map>\n" );
 		return;
 	}
 
-	if ( !MapGen_DMap( args.Argv( 1 ), outputMapName, status ) ) {
-		gameLocal.Printf( "mapgen_dmap: %s\n", status.c_str() );
+	if ( !MapGen_Join( args.Argv( 1 ), args.Argv( 2 ), status ) ) {
+		gameLocal.Printf( "mapgen_join: %s\n", status.c_str() );
 		return;
 	}
 
-	gameLocal.Printf( "mapgen_dmap: %s\n", status.c_str() );
-	gameLocal.Printf( "mapgen_dmap: wrote %s\n", outputMapName.c_str() );
+	outputMapName = args.Argv( 2 );
+	outputMapName.BackSlashesToSlashes();
+	outputMapName.StripFileExtension();
+	outputMapName.SetFileExtension( "map" );
+
+	gameLocal.Printf( "mapgen_join: %s\n", status.c_str() );
+	gameLocal.Printf( "mapgen_join: wrote %s\n", outputMapName.c_str() );
 }
 
 /*
@@ -2391,7 +2396,7 @@ void idGameLocal::InitConsoleCommands( void ) {
 	cmdSystem->AddCommand( "script",				Cmd_Script_f,				CMD_FL_GAME|CMD_FL_CHEAT,	"executes a line of script" );
 	cmdSystem->AddCommand( "listCollisionModels",	Cmd_ListCollisionModels_f,	CMD_FL_GAME,				"lists collision models" );
 	cmdSystem->AddCommand( "collisionModelInfo",	Cmd_CollisionModelInfo_f,	CMD_FL_GAME,				"shows collision model info" );
-	cmdSystem->AddCommand( "mapgen_dmap",			Cmd_MapGenDMap_f,			CMD_FL_GAME,				"generates a map from a mapgen join plan", ArgCompletion_MapGenPlan );
+	cmdSystem->AddCommand( "mapgen_join",			Cmd_MapGenJoin_f,			CMD_FL_GAME,				"joins maps from a mapgen plan into an output map", ArgCompletion_MapGenPlan );
 	cmdSystem->AddCommand( "reexportmodels",		Cmd_ReexportModels_f,		CMD_FL_GAME|CMD_FL_CHEAT,	"reexports models", ArgCompletion_DefFile );
 	cmdSystem->AddCommand( "reloadanims",			Cmd_ReloadAnims_f,			CMD_FL_GAME|CMD_FL_CHEAT,	"reloads animations" );
 	cmdSystem->AddCommand( "listAnims",				Cmd_ListAnims_f,			CMD_FL_GAME,				"lists all animations" );

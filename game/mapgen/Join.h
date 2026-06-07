@@ -17,9 +17,9 @@
 #ifndef __GAME_MAPGEN_JOIN_H__
 #define __GAME_MAPGEN_JOIN_H__
 
-#include "MapGenEntity.h"
-#include "MapGenGeometry.h"
-#include "MapGenPlan.h"
+#include "Entity.h"
+#include "Geometry.h"
+#include "Plan.h"
 #include "idlib/MapFile.h"
 
 class mapgenMapJoiner {

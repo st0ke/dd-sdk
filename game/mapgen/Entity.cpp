@@ -18,8 +18,8 @@
 
 #include <cstdlib>
 
-#include "MapGenConstants.h"
-#include "MapGenEntity.h"
+#include "Constants.h"
+#include "Entity.h"
 
 mapgenNamePair::mapgenNamePair() { }
 

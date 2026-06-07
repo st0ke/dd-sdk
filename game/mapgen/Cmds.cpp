@@ -16,8 +16,8 @@
 
 #include "sys/platform.h"
 
-#include "MapGenCmds.h"
-#include "MapGenJoin.h"
+#include "Cmds.h"
+#include "Join.h"
 
 bool MapGen_Join(const char* planName, const char* outputMapName, idStr& status) {
     mapgenJoinJob job;

@@ -16,7 +16,7 @@
 
 #include "framework/Common.h"
 #include "framework/FileSystem.h"
-#include "game/mapgen/MapGenCmds.h"
+#include "game/mapgen/Cmds.h"
 #include "idlib/Lib.h"
 #include "idlib/MapFile.h"
 #include "sys/platform.h"

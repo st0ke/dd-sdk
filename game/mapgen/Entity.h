@@ -17,7 +17,7 @@
 #ifndef __GAME_MAPGEN_ENTITY_H__
 #define __GAME_MAPGEN_ENTITY_H__
 
-#include "MapGenGeometry.h"
+#include "Geometry.h"
 #include "idlib/MapFile.h"
 
 class mapgenNamePair {

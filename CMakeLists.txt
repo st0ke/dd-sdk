@@ -426,11 +426,11 @@ set(src_game
 	game/gamesys/SysCmds.cpp
 	game/gamesys/SysCvar.cpp
 	game/gamesys/TypeInfo.cpp
-	game/mapgen/MapGenEntity.cpp
-	game/mapgen/MapGenGeometry.cpp
-	game/mapgen/MapGenJoin.cpp
-	game/mapgen/MapGenCmds.cpp
-	game/mapgen/MapGenPlan.cpp
+	game/mapgen/Entity.cpp
+	game/mapgen/Geometry.cpp
+	game/mapgen/Join.cpp
+	game/mapgen/Cmds.cpp
+	game/mapgen/Plan.cpp
 	game/anim/Anim.cpp
 	game/anim/Anim_Blend.cpp
 	game/anim/Anim_Import.cpp
@@ -626,12 +626,12 @@ if(BUILD_TESTING)
 	enable_testing()
 
 	add_executable(mapgen_test
-		game/mapgen/tests/mapgen_test.cpp
-		game/mapgen/MapGenEntity.cpp
-		game/mapgen/MapGenGeometry.cpp
-		game/mapgen/MapGenJoin.cpp
-		game/mapgen/MapGenCmds.cpp
-		game/mapgen/MapGenPlan.cpp
+		game/mapgen/tests/Test.cpp
+		game/mapgen/Entity.cpp
+		game/mapgen/Geometry.cpp
+		game/mapgen/Join.cpp
+		game/mapgen/Cmds.cpp
+		game/mapgen/Plan.cpp
 	)
 	set_target_properties(mapgen_test PROPERTIES COMPILE_DEFINITIONS "${BASE_DEFS}")
 	target_include_directories(mapgen_test PRIVATE "${CMAKE_SOURCE_DIR}/game")

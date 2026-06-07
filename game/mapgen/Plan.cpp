@@ -16,7 +16,7 @@
 
 #include "sys/platform.h"
 
-#include "MapGenPlan.h"
+#include "Plan.h"
 
 static const char* const MAPGEN_BUILTIN_PLAN_NAME = "gate2_testgg";
 static const char* const MAPGEN_TESTGG_PREFIX = "m0__";

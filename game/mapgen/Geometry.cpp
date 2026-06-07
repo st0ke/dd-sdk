@@ -18,8 +18,8 @@
 #include "idlib/math/Rotation.h"
 #include "sys/platform.h"
 
-#include "MapGenConstants.h"
-#include "MapGenGeometry.h"
+#include "Constants.h"
+#include "Geometry.h"
 
 mapgenTransform::mapgenTransform()
     : rotation(mat3_identity)

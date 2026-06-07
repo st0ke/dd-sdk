@@ -2,7 +2,7 @@
 
 - This is a CMake project.
 - Use `../../build/dd-sdk-vscode/RelWithDebInfo` as the build directory for compilation checks and unit test execution.
-- Format C++ files via the clang-format command, using the .clang-format file from the directory of the edited file or a higher directory up to the project root.
+- Format C++ files via the clang-format command only when the edited file is in a directory containing `.clang-format` or recursively below it. Currently, only `game/mapgen` has a `.clang-format`, so do not run clang-format on C++ files outside `game/mapgen`, such as `game/gamesys/SysCmds.cpp`.
 
 In a new file put the following copyright notice as a file header (use '//' for C++):
 

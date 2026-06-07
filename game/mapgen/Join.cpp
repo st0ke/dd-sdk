@@ -16,7 +16,7 @@
 
 #include "sys/platform.h"
 
-#include "MapGenJoin.h"
+#include "Join.h"
 
 mapgenMapJoiner::mapgenMapJoiner(idMapFile& destMap, idMapFile& sourceMap, const mapgenSlot& sourceSlot,
     const mapgenSlot& destSlot, const char* prefix)

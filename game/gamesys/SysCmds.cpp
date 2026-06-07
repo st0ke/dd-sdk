@@ -2277,6 +2277,11 @@ static void ArgCompletion_MapGenPlan( const idCmdArgs &args, void(*callback)( co
 	callback( va( "%s gate2_testgg", args.Argv( 0 ) ) );
 }
 
+static void BufferMapGenCommand( const char *commandText, void *userData ) {
+	(void)userData;
+	cmdSystem->BufferCommandText( CMD_EXEC_APPEND, commandText );
+}
+
 /*
 ==================
 Cmd_MapGenJoin_f
@@ -2303,6 +2308,29 @@ static void Cmd_MapGenJoin_f( const idCmdArgs &args ) {
 
 	gameLocal.Printf( "mapgen_join: %s\n", status.c_str() );
 	gameLocal.Printf( "mapgen_join: wrote %s\n", outputMapName.c_str() );
+}
+
+/*
+==================
+Cmd_MapGenDevMap_f
+==================
+*/
+static void Cmd_MapGenDevMap_f( const idCmdArgs &args ) {
+	idStr outputMapName;
+	idStr status;
+
+	if ( args.Argc() != 2 ) {
+		gameLocal.Printf( "usage: mapgen_devmap <plan>\n" );
+		return;
+	}
+
+	if ( !MapGen_DevMap( args.Argv( 1 ), BufferMapGenCommand, NULL, status, outputMapName ) ) {
+		gameLocal.Printf( "mapgen_devmap: %s\n", status.c_str() );
+		return;
+	}
+
+	gameLocal.Printf( "mapgen_devmap: %s\n", status.c_str() );
+	gameLocal.Printf( "mapgen_devmap: wrote %s\n", outputMapName.c_str() );
 }
 
 /*
@@ -2397,6 +2425,7 @@ void idGameLocal::InitConsoleCommands( void ) {
 	cmdSystem->AddCommand( "listCollisionModels",	Cmd_ListCollisionModels_f,	CMD_FL_GAME,				"lists collision models" );
 	cmdSystem->AddCommand( "collisionModelInfo",	Cmd_CollisionModelInfo_f,	CMD_FL_GAME,				"shows collision model info" );
 	cmdSystem->AddCommand( "mapgen_join",			Cmd_MapGenJoin_f,			CMD_FL_GAME,				"joins maps from a mapgen plan into an output map", ArgCompletion_MapGenPlan );
+	cmdSystem->AddCommand( "mapgen_devmap",			Cmd_MapGenDevMap_f,			CMD_FL_GAME,				"joins a mapgen plan, dmaps it, and runs it as a devmap", ArgCompletion_MapGenPlan );
 	cmdSystem->AddCommand( "reexportmodels",		Cmd_ReexportModels_f,		CMD_FL_GAME|CMD_FL_CHEAT,	"reexports models", ArgCompletion_DefFile );
 	cmdSystem->AddCommand( "reloadanims",			Cmd_ReloadAnims_f,			CMD_FL_GAME|CMD_FL_CHEAT,	"reloads animations" );
 	cmdSystem->AddCommand( "listAnims",				Cmd_ListAnims_f,			CMD_FL_GAME,				"lists all animations" );

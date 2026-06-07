@@ -19,7 +19,43 @@
 #include "Cmds.h"
 #include "Join.h"
 
+namespace {
+
+const char* const MAPGEN_DEVMAP_OUTPUT = "maps/mapgen/devmap";
+const char* const MAPGEN_DEVMAP_MAP = "mapgen/devmap";
+
+void BufferCommand(mapgenCommandBuffer_t bufferCommand, void* userData, const char* commandName, const char* mapName) {
+    idStr commandText;
+
+    commandText = commandName;
+    commandText += " ";
+    commandText += mapName;
+    commandText += "\n";
+    bufferCommand(commandText.c_str(), userData);
+}
+
+}
+
 bool MapGen_Join(const char* planName, const char* outputMapName, idStr& status) {
     mapgenJoinJob job;
     return job.Run(planName, outputMapName, status);
+}
+
+bool MapGen_DevMap(
+    const char* planName, mapgenCommandBuffer_t bufferCommand, void* userData, idStr& status, idStr& outputMapName) {
+    if (!MapGen_Join(planName, MAPGEN_DEVMAP_OUTPUT, status)) {
+        return false;
+    }
+
+    outputMapName = MAPGEN_DEVMAP_OUTPUT;
+    outputMapName.BackSlashesToSlashes();
+    outputMapName.StripFileExtension();
+    outputMapName.SetFileExtension("map");
+
+    if (bufferCommand != NULL) {
+        BufferCommand(bufferCommand, userData, "dmap", MAPGEN_DEVMAP_MAP);
+        BufferCommand(bufferCommand, userData, "devmap", MAPGEN_DEVMAP_MAP);
+    }
+
+    return true;
 }

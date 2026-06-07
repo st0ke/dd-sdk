@@ -21,4 +21,9 @@ class idStr;
 
 bool MapGen_Join(const char* planName, const char* outputMapName, idStr& status);
 
+typedef void (*mapgenCommandBuffer_t)(const char* commandText, void* userData);
+
+bool MapGen_DevMap(
+    const char* planName, mapgenCommandBuffer_t bufferCommand, void* userData, idStr& status, idStr& outputMapName);
+
 #endif /* !__GAME_MAPGEN_CMDS_H__ */

@@ -4,7 +4,13 @@
 - Use `../../build/dd-sdk-vscode/RelWithDebInfo` as the build directory for compilation checks and unit test execution.
 - Format C++ files via the clang-format command only when the edited file is in a directory containing `.clang-format` or recursively below it. Currently, only `game/mapgen` has a `.clang-format`, so do not run clang-format on C++ files outside `game/mapgen`, such as `game/gamesys/SysCmds.cpp`.
 
-In a new file put the following copyright notice as a file header (use '//' for C++):
+## C++ Code Style
+
+- Prefer anonymous namespaces over file-scope `static` for internal-linkage functions and constants.
+
+## Licensing
+
+For new project-authored source files and substantive scripts, put the following copyright notice as a file header (use '//' for C++). Do not add it to upstream vendored files, tiny metadata files, generated version markers, or skill/frontmatter YAML files unless explicitly requested:
 
 ```
 DD game project

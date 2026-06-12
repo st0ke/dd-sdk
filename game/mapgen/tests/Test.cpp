@@ -630,9 +630,49 @@ static const char* MAPGEN_TESTGG_MISSING_SLOT_MAP
       "}\n"
       "}\n";
 
+static const char* MAPGEN_GATE2_TESTGG_PLAN_JSON = "{\n"
+                                                   "  \"maps\": [\n"
+                                                   "    {\n"
+                                                   "      \"id\": \"base\",\n"
+                                                   "      \"map\": \"mapgen/testgg\"\n"
+                                                   "    },\n"
+                                                   "    {\n"
+                                                   "      \"id\": \"gate_left\",\n"
+                                                   "      \"map\": \"mapgen/gate2\"\n"
+                                                   "    },\n"
+                                                   "    {\n"
+                                                   "      \"id\": \"gate_right\",\n"
+                                                   "      \"map\": \"mapgen/gate2\"\n"
+                                                   "    }\n"
+                                                   "  ],\n"
+                                                   "  \"joins\": [\n"
+                                                   "    {\n"
+                                                   "      \"source\": {\n"
+                                                   "        \"map\": \"gate_left\",\n"
+                                                   "        \"slot\": \"slot_0\"\n"
+                                                   "      },\n"
+                                                   "      \"dest\": {\n"
+                                                   "        \"map\": \"base\",\n"
+                                                   "        \"slot\": \"slot_gg0\"\n"
+                                                   "      }\n"
+                                                   "    },\n"
+                                                   "    {\n"
+                                                   "      \"source\": {\n"
+                                                   "        \"map\": \"gate_right\",\n"
+                                                   "        \"slot\": \"slot_0\"\n"
+                                                   "      },\n"
+                                                   "      \"dest\": {\n"
+                                                   "        \"map\": \"base\",\n"
+                                                   "        \"slot\": \"slot_gg1\"\n"
+                                                   "      }\n"
+                                                   "    }\n"
+                                                   "  ]\n"
+                                                   "}\n";
+
 static void AddGate2TestggFiles(TestFileSystem& testFileSystem) {
     testFileSystem.AddFile("maps/mapgen/gate2.map", MAPGEN_GATE2_MAP);
     testFileSystem.AddFile("maps/mapgen/testgg.map", MAPGEN_TESTGG_MAP);
+    testFileSystem.AddFile("mapgen/plans/gate2_testgg.json", MAPGEN_GATE2_TESTGG_PLAN_JSON);
 }
 
 static void RunMapGenJoinPlanTest(TestFileSystem& testFileSystem) {
@@ -650,31 +690,31 @@ static void RunMapGenJoinPlanTest(TestFileSystem& testFileSystem) {
     Expect(
         generatedMap.GetEntity(0)->GetNumPrimitives() == 3, "expected merged worldspawn primitives from all instances");
 
-    idMapEntity* testggMarker = generatedMap.FindEntity("m0__testgg_marker");
-    idMapEntity* firstSlot = generatedMap.FindEntity("m1__slot_0");
-    idMapEntity* firstMarker = generatedMap.FindEntity("m1__gate_marker");
-    idMapEntity* secondSlot = generatedMap.FindEntity("m2__slot_0");
-    idMapEntity* secondMarker = generatedMap.FindEntity("m2__gate_marker");
+    idMapEntity* testggMarker = generatedMap.FindEntity("base_testgg_marker");
+    idMapEntity* firstSlot = generatedMap.FindEntity("gate_left_slot_0");
+    idMapEntity* firstMarker = generatedMap.FindEntity("gate_left_gate_marker");
+    idMapEntity* secondSlot = generatedMap.FindEntity("gate_right_slot_0");
+    idMapEntity* secondMarker = generatedMap.FindEntity("gate_right_gate_marker");
     Expect(testggMarker != NULL, "missing prefixed testgg marker");
     Expect(firstSlot != NULL && firstMarker != NULL, "missing first gate instance");
     Expect(secondSlot != NULL && secondMarker != NULL, "missing second gate instance");
-    Expect(generatedMap.FindEntity("m0__slot_gg0") != NULL, "missing first prefixed destination slot");
-    Expect(generatedMap.FindEntity("m0__slot_gg1") != NULL, "missing second prefixed destination slot");
-    ExpectString(generatedMap.FindEntity("m0__slot_gg0")->epairs.GetString("model"), "m0__slot_gg0",
+    Expect(generatedMap.FindEntity("base_slot_gg0") != NULL, "missing first prefixed destination slot");
+    Expect(generatedMap.FindEntity("base_slot_gg1") != NULL, "missing second prefixed destination slot");
+    ExpectString(generatedMap.FindEntity("base_slot_gg0")->epairs.GetString("model"), "base_slot_gg0",
         "unexpected first destination slot model");
-    ExpectString(generatedMap.FindEntity("m0__slot_gg1")->epairs.GetString("model"), "m0__slot_gg1",
+    ExpectString(generatedMap.FindEntity("base_slot_gg1")->epairs.GetString("model"), "base_slot_gg1",
         "unexpected second destination slot model");
-    ExpectString(firstSlot->epairs.GetString("model"), "m1__slot_0", "unexpected first gate slot model");
-    ExpectString(secondSlot->epairs.GetString("model"), "m2__slot_0", "unexpected second gate slot model");
+    ExpectString(firstSlot->epairs.GetString("model"), "gate_left_slot_0", "unexpected first gate slot model");
+    ExpectString(secondSlot->epairs.GetString("model"), "gate_right_slot_0", "unexpected second gate slot model");
 
-    ExpectString(testggMarker->epairs.GetString("target"), "m0__testgg_marker", "unexpected testgg target");
-    ExpectString(testggMarker->epairs.GetString("team"), "m0__testgg_team", "unexpected testgg team");
-    ExpectString(firstMarker->epairs.GetString("target"), "m1__gate_marker", "unexpected first gate target");
-    ExpectString(firstMarker->epairs.GetString("team"), "m1__gate_team", "unexpected first gate team");
+    ExpectString(testggMarker->epairs.GetString("target"), "base_testgg_marker", "unexpected testgg target");
+    ExpectString(testggMarker->epairs.GetString("team"), "base_testgg_team", "unexpected testgg team");
+    ExpectString(firstMarker->epairs.GetString("target"), "gate_left_gate_marker", "unexpected first gate target");
+    ExpectString(firstMarker->epairs.GetString("team"), "gate_left_gate_team", "unexpected first gate team");
     ExpectString(firstMarker->epairs.GetString("model"), "models/mapobjects/test.lwo",
         "external model path was unexpectedly prefixed");
-    ExpectString(secondMarker->epairs.GetString("target"), "m2__gate_marker", "unexpected second gate target");
-    ExpectString(secondMarker->epairs.GetString("team"), "m2__gate_team", "unexpected second gate team");
+    ExpectString(secondMarker->epairs.GetString("target"), "gate_right_gate_marker", "unexpected second gate target");
+    ExpectString(secondMarker->epairs.GetString("team"), "gate_right_gate_team", "unexpected second gate team");
 
     idVec3 firstSlotOrigin;
     idVec3 firstMarkerOrigin;
@@ -694,6 +734,29 @@ static void RunMapGenJoinPlanTest(TestFileSystem& testFileSystem) {
     ExpectNear(secondAngle, 180.0f, 0.01f, "second gate angle");
 }
 
+static void RunMapGenJoinPlanFileTest(TestFileSystem& testFileSystem) {
+    testFileSystem.RemoveFile("maps/mapgen/current_json.map");
+    AddGate2TestggFiles(testFileSystem);
+    testFileSystem.AddFile("mapgen/plans/gate2_testgg_json.json", MAPGEN_GATE2_TESTGG_PLAN_JSON);
+
+    const char* outputMapName = "maps/mapgen/current_json.map";
+    idStr status;
+    Expect(MapGen_Join("gate2_testgg_json", outputMapName, status), status.c_str());
+    ExpectContains(status.c_str(), "2 joins", "unexpected JSON-plan success status");
+
+    idMapFile generatedMap;
+    Expect(generatedMap.Parse("maps/mapgen/current_json", true), "generated JSON-plan map could not be parsed");
+    Expect(generatedMap.GetNumEntities() == 8, "expected JSON plan to generate testgg and two gate instances");
+
+    Expect(generatedMap.FindEntity("base_testgg_marker") != NULL, "missing ID-prefixed testgg marker");
+    Expect(generatedMap.FindEntity("base_slot_gg0") != NULL, "missing first ID-prefixed destination slot");
+    Expect(generatedMap.FindEntity("base_slot_gg1") != NULL, "missing second ID-prefixed destination slot");
+    Expect(generatedMap.FindEntity("gate_left_slot_0") != NULL, "missing left gate ID-prefixed slot");
+    Expect(generatedMap.FindEntity("gate_left_gate_marker") != NULL, "missing left gate ID-prefixed marker");
+    Expect(generatedMap.FindEntity("gate_right_slot_0") != NULL, "missing right gate ID-prefixed slot");
+    Expect(generatedMap.FindEntity("gate_right_gate_marker") != NULL, "missing right gate ID-prefixed marker");
+}
+
 static void RunMapGenPlanFailureTests(TestFileSystem& testFileSystem) {
     const char* outputMapName = "maps/mapgen/current.map";
     idStr status;
@@ -701,6 +764,11 @@ static void RunMapGenPlanFailureTests(TestFileSystem& testFileSystem) {
     testFileSystem.RemoveFile("maps/mapgen/current.map");
     Expect(!MapGen_Join("missing_plan", outputMapName, status), "unknown plan unexpectedly succeeded");
     ExpectContains(status.c_str(), "unknown mapgen plan", "unexpected unknown-plan status");
+
+    testFileSystem.AddFile("mapgen/plans/bad_plan.json", "{");
+    status.Clear();
+    Expect(!MapGen_Join("bad_plan", outputMapName, status), "malformed JSON plan unexpectedly succeeded");
+    ExpectContains(status.c_str(), "could not parse mapgen plan", "unexpected malformed-plan status");
 
     testFileSystem.RemoveFile("maps/mapgen/gate2.map");
     testFileSystem.AddFile("maps/mapgen/testgg.map", MAPGEN_TESTGG_MAP);
@@ -777,6 +845,7 @@ int main(int argc, char** argv) {
         idLib::Init();
         idLibInitialized = true;
         RunMapGenJoinPlanTest(testFileSystem);
+        RunMapGenJoinPlanFileTest(testFileSystem);
         RunMapGenPlanFailureTests(testFileSystem);
     } catch (const std::exception& ex) {
         if (idLibInitialized) {

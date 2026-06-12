@@ -64,7 +64,6 @@ private:
     idList<mapgenJoinPlanJoin> joins;
 
     bool LoadFromDisk(const char* planName, idStr& status);
-    void BuildGate2TestggPlan(void);
 };
 
 #endif /* !__GAME_MAPGEN_PLAN_H__ */

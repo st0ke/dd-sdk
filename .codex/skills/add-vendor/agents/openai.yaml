@@ -1,0 +1,4 @@
+interface:
+  display_name: "Add Vendor"
+  short_description: "Vendor third-party dependencies"
+  default_prompt: "Use $add-vendor to add or update a vendored dependency in this dd-sdk repository."

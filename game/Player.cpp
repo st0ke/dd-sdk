@@ -158,9 +158,7 @@ void WriteWeaponInventoryToSnapshot( const idInventory &inventory, idBitMsgDelta
 
 void ReadWeaponInventoryFromSnapshot( idPlayer &player, const idBitMsgDelta &msg ) {
 	idInventory &inventory = player.inventory;
-	inventory.weaponInstances.Clear();
-	inventory.weaponInstanceIndex.Clear();
-	inventory.nextWeaponInstanceId = 1;
+	inventory.ClearWeapons();
 
 	const int numWeapons = msg.ReadBits( idMath::BitsForInteger( MAX_WEAPON_INSTANCES ) );
 	for( int i = 0; i < numWeapons; i++ ) {
@@ -173,6 +171,187 @@ void ReadWeaponInventoryFromSnapshot( idPlayer &player, const idBitMsgDelta &msg
 	player.ValidateWeaponAliases();
 }
 
+}
+
+/*
+==============
+idWeaponInstanceCollection::idWeaponInstanceCollection
+==============
+*/
+idWeaponInstanceCollection::idWeaponInstanceCollection() : index( 128, MAX_WEAPON_INSTANCES ) {
+	Clear();
+}
+
+/*
+==============
+idWeaponInstanceCollection::Clear
+==============
+*/
+void idWeaponInstanceCollection::Clear( void ) {
+	weapons.Clear();
+	index.Clear();
+	nextId = 1;
+	CheckIntegrity();
+}
+
+/*
+==============
+idWeaponInstanceCollection::Add
+==============
+*/
+int idWeaponInstanceCollection::Add( const char *weaponClassName, int weaponSlot, int clip, int requestedWeaponId ) {
+	if ( !weaponClassName || !*weaponClassName || weaponSlot < 0 || weaponSlot >= MAX_WEAPONS || weapons.Num() >= MAX_WEAPON_INSTANCES ) {
+		return -1;
+	}
+
+	int weaponId = requestedWeaponId;
+	if ( weaponId > 0 ) {
+		if ( Find( weaponId ) ) {
+			return -1;
+		}
+		if ( nextId <= weaponId ) {
+			nextId = weaponId + 1;
+		}
+	} else {
+		while( Find( nextId ) ) {
+			nextId++;
+		}
+		weaponId = nextId++;
+	}
+
+	inventoryWeapon_t weapon;
+	weapon.id = weaponId;
+	weapon.weaponClassName = weaponClassName;
+	weapon.weaponSlot = weaponSlot;
+	weapon.clip = clip;
+
+	const int weaponIndex = weapons.Append( weapon );
+	index.Add( weapon.id, weaponIndex );
+	CheckIntegrity();
+	return weapon.id;
+}
+
+/*
+==============
+idWeaponInstanceCollection::Remove
+==============
+*/
+bool idWeaponInstanceCollection::Remove( int weaponId ) {
+	const int weaponIndex = FindIndex( weaponId );
+	if ( weaponIndex < 0 ) {
+		return false;
+	}
+
+	index.RemoveIndex( weaponId, weaponIndex );
+	weapons.RemoveIndex( weaponIndex );
+	CheckIntegrity();
+	return true;
+}
+
+/*
+==============
+idWeaponInstanceCollection::Find
+==============
+*/
+const inventoryWeapon_t *idWeaponInstanceCollection::Find( int weaponId ) const {
+	const int weaponIndex = FindIndex( weaponId );
+	return weaponIndex >= 0 ? &weapons[ weaponIndex ] : NULL;
+}
+
+/*
+==============
+idWeaponInstanceCollection::SetClip
+==============
+*/
+bool idWeaponInstanceCollection::SetClip( int weaponId, int clip ) {
+	const int weaponIndex = FindIndex( weaponId );
+	if ( weaponIndex < 0 ) {
+		return false;
+	}
+
+	weapons[ weaponIndex ].clip = clip;
+	return true;
+}
+
+/*
+==============
+idWeaponInstanceCollection::Num
+==============
+*/
+int idWeaponInstanceCollection::Num( void ) const {
+	return weapons.Num();
+}
+
+/*
+==============
+idWeaponInstanceCollection::At
+==============
+*/
+const inventoryWeapon_t &idWeaponInstanceCollection::At( int weaponIndex ) const {
+	assert( weaponIndex >= 0 && weaponIndex < weapons.Num() );
+	return weapons[ weaponIndex ];
+}
+
+/*
+==============
+idWeaponInstanceCollection::GetNextId
+==============
+*/
+int idWeaponInstanceCollection::GetNextId( void ) const {
+	return nextId;
+}
+
+/*
+==============
+idWeaponInstanceCollection::SetNextId
+==============
+*/
+void idWeaponInstanceCollection::SetNextId( int restoredNextId ) {
+	nextId = restoredNextId > 0 ? restoredNextId : 1;
+	for( int i = 0; i < weapons.Num(); i++ ) {
+		if ( nextId <= weapons[ i ].id ) {
+			nextId = weapons[ i ].id + 1;
+		}
+	}
+	CheckIntegrity();
+}
+
+/*
+==============
+idWeaponInstanceCollection::FindIndex
+==============
+*/
+int idWeaponInstanceCollection::FindIndex( int weaponId ) const {
+	if ( weaponId <= 0 ) {
+		return -1;
+	}
+
+	for( int weaponIndex = index.First( weaponId ); weaponIndex != -1; weaponIndex = index.Next( weaponIndex ) ) {
+		assert( weaponIndex >= 0 && weaponIndex < weapons.Num() );
+		if ( weaponIndex < 0 || weaponIndex >= weapons.Num() ) {
+			return -1;
+		}
+		if ( weapons[ weaponIndex ].id == weaponId ) {
+			return weaponIndex;
+		}
+	}
+	return -1;
+}
+
+/*
+==============
+idWeaponInstanceCollection::CheckIntegrity
+==============
+*/
+void idWeaponInstanceCollection::CheckIntegrity( void ) const {
+	for( int i = 0; i < weapons.Num(); i++ ) {
+		assert( weapons[ i ].id > 0 );
+		assert( nextId > weapons[ i ].id );
+		assert( FindIndex( weapons[ i ].id ) == i );
+		for( int j = i + 1; j < weapons.Num(); j++ ) {
+			assert( weapons[ i ].id != weapons[ j ].id );
+		}
+	}
 }
 
 idVec3 idPlayer::colorBarTable[ 5 ] = {
@@ -190,9 +369,7 @@ idInventory::Clear
 */
 void idInventory::Clear( void ) {
 	maxHealth		= 0;
-	weaponInstances.Clear();
-	weaponInstanceIndex.Clear();
-	nextWeaponInstanceId = 1;
+	ClearWeapons();
 	powerups		= 0;
 	armor			= 0;
 	maxarmor		= 0;
@@ -232,6 +409,15 @@ void idInventory::Clear( void ) {
 	ammoPulse	= false;
 	weaponPulse	= false;
 	armorPulse	= false;
+}
+
+/*
+==============
+idInventory::ClearWeapons
+==============
+*/
+void idInventory::ClearWeapons( void ) {
+	weaponInstances.Clear();
 }
 
 /*
@@ -283,26 +469,7 @@ idInventory::AddWeapon
 ==============
 */
 int idInventory::AddWeapon( const char *weaponClassName, int weaponSlot, int clip, int requestedWeaponId ) {
-	if ( !weaponClassName || !*weaponClassName || weaponSlot < 0 || weaponSlot >= MAX_WEAPONS || weaponInstances.Num() >= MAX_WEAPON_INSTANCES ) {
-		return -1;
-	}
-
-	inventoryWeapon_t weapon;
-	weapon.id = ( requestedWeaponId > 0 ) ? requestedWeaponId : nextWeaponInstanceId++;
-	weapon.weaponClassName = weaponClassName;
-	weapon.weaponSlot = weaponSlot;
-	weapon.clip = clip;
-
-	if ( HasWeapon( weapon.id ) ) {
-		return -1;
-	}
-	if ( requestedWeaponId > 0 && nextWeaponInstanceId <= requestedWeaponId ) {
-		nextWeaponInstanceId = requestedWeaponId + 1;
-	}
-
-	const int index = weaponInstances.Append( weapon );
-	weaponInstanceIndex.Add( weapon.id, index );
-	return weapon.id;
+	return weaponInstances.Add( weaponClassName, weaponSlot, clip, requestedWeaponId );
 }
 
 /*
@@ -329,17 +496,7 @@ idInventory::GetWeapon
 ==============
 */
 const inventoryWeapon_t *idInventory::GetWeapon( int weaponId ) const {
-	if ( weaponId <= 0 ) {
-		return NULL;
-	}
-
-	for( int index = weaponInstanceIndex.First( weaponId ); index != -1; index = weaponInstanceIndex.Next( index ) ) {
-		const inventoryWeapon_t &weapon = weaponInstances[ index ];
-		if ( weapon.id == weaponId ) {
-			return &weapon;
-		}
-	}
-	return NULL;
+	return weaponInstances.Find( weaponId );
 }
 
 /*
@@ -378,14 +535,7 @@ idInventory::SetWeaponClip
 ==============
 */
 bool idInventory::SetWeaponClip( int weaponId, int clip ) {
-	for( int index = weaponInstanceIndex.First( weaponId ); index != -1; index = weaponInstanceIndex.Next( index ) ) {
-		inventoryWeapon_t &weapon = weaponInstances[ index ];
-		if ( weapon.id == weaponId ) {
-			weapon.clip = clip;
-			return true;
-		}
-	}
-	return false;
+	return weaponInstances.SetClip( weaponId, clip );
 }
 
 /*
@@ -397,7 +547,7 @@ int idInventory::FindWeaponInSlot( int weaponSlot, int excludeWeaponId ) const {
 	int bestWeaponId = -1;
 
 	for( int i = 0; i < weaponInstances.Num(); i++ ) {
-		const inventoryWeapon_t *weapon = &weaponInstances[ i ];
+		const inventoryWeapon_t *weapon = &weaponInstances.At( i );
 		if ( weapon->id == excludeWeaponId || weapon->weaponSlot != weaponSlot ) {
 			continue;
 		}
@@ -418,7 +568,7 @@ int idInventory::FindNewestWeaponInSlot( int weaponSlot ) const {
 	int newestWeaponId = -1;
 
 	for( int i = 0; i < weaponInstances.Num(); i++ ) {
-		const inventoryWeapon_t &weapon = weaponInstances[ i ];
+		const inventoryWeapon_t &weapon = weaponInstances.At( i );
 		if ( weapon.weaponSlot == weaponSlot && weapon.id > newestWeaponId ) {
 			newestWeaponId = weapon.id;
 		}
@@ -439,7 +589,7 @@ int idInventory::FindWeaponByClassName( const char *weaponClassName ) const {
 	}
 
 	for( int i = 0; i < weaponInstances.Num(); i++ ) {
-		const inventoryWeapon_t *weapon = &weaponInstances[ i ];
+		const inventoryWeapon_t *weapon = &weaponInstances.At( i );
 		if ( idStr::Icmp( weapon->weaponClassName, weaponClassName ) != 0 ) {
 			continue;
 		}
@@ -467,7 +617,7 @@ idInventory::GetNextWeaponInstanceId
 ==============
 */
 int idInventory::GetNextWeaponInstanceId( void ) const {
-	return nextWeaponInstanceId;
+	return weaponInstances.GetNextId();
 }
 
 /*
@@ -487,7 +637,7 @@ idInventory::GetSortedWeaponIdsById
 void idInventory::GetSortedWeaponIdsById( idList<int> &weaponIds ) const {
 	weaponIds.Clear();
 	for( int i = 0; i < weaponInstances.Num(); i++ ) {
-		InsertWeaponIdSorted( weaponIds, weaponInstances[ i ], *this, false );
+		InsertWeaponIdSorted( weaponIds, weaponInstances.At( i ), *this, false );
 	}
 }
 
@@ -499,7 +649,7 @@ idInventory::GetSortedWeaponIdsBySlot
 void idInventory::GetSortedWeaponIdsBySlot( idList<int> &weaponIds ) const {
 	weaponIds.Clear();
 	for( int i = 0; i < weaponInstances.Num(); i++ ) {
-		InsertWeaponIdSorted( weaponIds, weaponInstances[ i ], *this, true );
+		InsertWeaponIdSorted( weaponIds, weaponInstances.At( i ), *this, true );
 	}
 }
 
@@ -583,7 +733,7 @@ void idInventory::GetPersistantData( idDict &dict ) {
 	// weapons
 	idList<int> weaponIds;
 	GetSortedWeaponIdsById( weaponIds );
-	dict.SetInt( "weapon_instance_next_id", nextWeaponInstanceId );
+	dict.SetInt( "weapon_instance_next_id", weaponInstances.GetNextId() );
 	dict.SetInt( "weapon_instance_count", weaponIds.Num() );
 	for( i = 0; i < weaponIds.Num(); i++ ) {
 		const inventoryWeapon_t *weapon = GetWeapon( weaponIds[ i ] );
@@ -693,10 +843,7 @@ void idInventory::RestoreInventory( idPlayer *owner, const idDict &dict ) {
 
 	// weapons are stored as explicit player-local instances in persistent data
 	if ( dict.FindKey( "weapon_instance_count" ) ) {
-		nextWeaponInstanceId = dict.GetInt( "weapon_instance_next_id", "1" );
-		if ( nextWeaponInstanceId < 1 ) {
-			nextWeaponInstanceId = 1;
-		}
+		weaponInstances.SetNextId( dict.GetInt( "weapon_instance_next_id", "1" ) );
 		num = dict.GetInt( "weapon_instance_count", "0" );
 		for( i = 0; i < num; i++ ) {
 			const int weaponId = dict.GetInt( va( "weapon_instance_%i_id", i ), "-1" );
@@ -735,7 +882,7 @@ void idInventory::Save( idSaveGame *savefile ) const {
 	idList<int> weaponIds;
 
 	savefile->WriteInt( maxHealth );
-	savefile->WriteInt( nextWeaponInstanceId );
+	savefile->WriteInt( weaponInstances.GetNextId() );
 	GetSortedWeaponIdsById( weaponIds );
 	savefile->WriteInt( weaponIds.Num() );
 	for( i = 0; i < weaponIds.Num(); i++ ) {
@@ -840,14 +987,11 @@ void idInventory::Restore( idRestoreGame *savefile ) {
 	int i, num;
 
 	savefile->ReadInt( maxHealth );
-	weaponInstances.Clear();
-	weaponInstanceIndex.Clear();
-	nextWeaponInstanceId = 1;
+	ClearWeapons();
 	if ( savefile->GetInternalSavegameVersion() >= 2 ) {
-		savefile->ReadInt( nextWeaponInstanceId );
-		if ( nextWeaponInstanceId < 1 ) {
-			nextWeaponInstanceId = 1;
-		}
+		int nextWeaponId;
+		savefile->ReadInt( nextWeaponId );
+		weaponInstances.SetNextId( nextWeaponId );
 		savefile->ReadInt( num );
 		for( i = 0; i < num; i++ ) {
 			int weaponId;
@@ -864,7 +1008,6 @@ void idInventory::Restore( idRestoreGame *savefile ) {
 	} else {
 		int legacyWeaponBits;
 		savefile->ReadInt( legacyWeaponBits );
-		nextWeaponInstanceId = 1;
 	}
 	savefile->ReadInt( powerups );
 	savefile->ReadInt( armor );
@@ -1208,18 +1351,9 @@ void idInventory::Drop( idPlayer *owner, const char *weaponClassName, int weapon
 		return;
 	}
 
-	int weaponIndex = -1;
-	for( int index = weaponInstanceIndex.First( weaponId ); index != -1; index = weaponInstanceIndex.Next( index ) ) {
-		if ( weaponInstances[ index ].id == weaponId ) {
-			weaponIndex = index;
-			break;
-		}
-	}
-	if ( weaponIndex < 0 ) {
+	if ( !weaponInstances.Remove( weaponId ) ) {
 		return;
 	}
-	weaponInstanceIndex.RemoveIndex( weaponId, weaponIndex );
-	weaponInstances.RemoveIndex( weaponIndex );
 	owner->RemoveWeaponAlias( weaponId );
 }
 

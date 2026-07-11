@@ -106,6 +106,32 @@ struct inventoryWeapon_t {
 	int						clip;
 };
 
+class idWeaponInstanceCollection {
+public:
+								idWeaponInstanceCollection();
+
+	void					Clear( void );
+	int						Add( const char *weaponClassName, int weaponSlot, int clip, int requestedWeaponId = -1 );
+	bool					Remove( int weaponId );
+	const inventoryWeapon_t *Find( int weaponId ) const;
+	bool					SetClip( int weaponId, int clip );
+	int						Num( void ) const;
+	const inventoryWeapon_t &At( int index ) const;
+	int						GetNextId( void ) const;
+	void					SetNextId( int nextId );
+
+private:
+								idWeaponInstanceCollection( const idWeaponInstanceCollection &other ) = delete;
+	idWeaponInstanceCollection &operator=( const idWeaponInstanceCollection &other ) = delete;
+
+	int						FindIndex( int weaponId ) const;
+	void					CheckIntegrity( void ) const;
+
+	idList<inventoryWeapon_t> weapons;
+	idHashIndex				index;
+	int						nextId;
+};
+
 // powerups - the "type" in item .def must match
 enum {
 	BERSERK = 0,
@@ -134,9 +160,6 @@ enum {
 class idInventory {
 public:
 	int						maxHealth;
-	idList<inventoryWeapon_t>	weaponInstances;
-	idHashIndex				weaponInstanceIndex;
-	int						nextWeaponInstanceId;
 	int						powerups;
 	int						armor;
 	int						maxarmor;
@@ -172,7 +195,7 @@ public:
 
 	idList<idLevelTriggerInfo> levelTriggers;
 
-								idInventory() : weaponInstanceIndex( 128, MAX_WEAPON_INSTANCES ) { Clear(); }
+								idInventory() { Clear(); }
 							~idInventory() { Clear(); }
 
 	// save games
@@ -180,6 +203,7 @@ public:
 	void					Restore( idRestoreGame *savefile );					// unarchives object from save game file
 
 	void					Clear( void );
+	void					ClearWeapons( void );
 	void					GivePowerUp( idPlayer *player, int powerup, int msec );
 	void					ClearPowerUps( void );
 	void					GetPersistantData( idDict &dict );
@@ -220,6 +244,9 @@ public:
 	int						onePickupTime;
 	idList<idItemInfo>		pickupItemNames;
 	idList<idObjectiveInfo>	objectiveNames;
+
+private:
+	idWeaponInstanceCollection weaponInstances;
 };
 
 typedef struct {

@@ -120,6 +120,61 @@ const int MAX_PDA_ITEMS = 128;
 const int STEPUP_TIME = 200;
 const int MAX_INVENTORY_ITEMS = 20;
 
+namespace {
+
+bool WeaponInstanceComesBefore( const inventoryWeapon_t &lhs, const inventoryWeapon_t &rhs, bool sortBySlot ) {
+	if ( sortBySlot && lhs.weaponSlot != rhs.weaponSlot ) {
+		return lhs.weaponSlot < rhs.weaponSlot;
+	}
+	return lhs.id < rhs.id;
+}
+
+void InsertWeaponIdSorted( idList<int> &weaponIds, const inventoryWeapon_t &weapon, const idInventory &inventory, bool sortBySlot ) {
+	for( int i = 0; i < weaponIds.Num(); i++ ) {
+		const inventoryWeapon_t *other = inventory.GetWeapon( weaponIds[ i ] );
+		if ( other && WeaponInstanceComesBefore( weapon, *other, sortBySlot ) ) {
+			weaponIds.Insert( weapon.id, i );
+			return;
+		}
+	}
+	weaponIds.Append( weapon.id );
+}
+
+void WriteWeaponInventoryToSnapshot( const idInventory &inventory, idBitMsgDelta &msg ) {
+	idList<int> weaponIds;
+	inventory.GetSortedWeaponIdsById( weaponIds );
+
+	msg.WriteBits( weaponIds.Num(), idMath::BitsForInteger( MAX_WEAPON_INSTANCES ) );
+	for( int i = 0; i < weaponIds.Num(); i++ ) {
+		const inventoryWeapon_t *weapon = inventory.GetWeapon( weaponIds[ i ] );
+		if ( !weapon ) {
+			continue;
+		}
+		msg.WriteInt( weapon->id );
+		msg.WriteBits( weapon->weaponSlot, idMath::BitsForInteger( MAX_WEAPONS ) );
+		msg.WriteBits( weapon->clip, ASYNC_PLAYER_INV_CLIP_BITS );
+	}
+}
+
+void ReadWeaponInventoryFromSnapshot( idPlayer &player, const idBitMsgDelta &msg ) {
+	idInventory &inventory = player.inventory;
+	inventory.weaponInstances.Clear();
+	inventory.weaponInstanceIndex.Clear();
+	inventory.nextWeaponInstanceId = 1;
+
+	const int numWeapons = msg.ReadBits( idMath::BitsForInteger( MAX_WEAPON_INSTANCES ) );
+	for( int i = 0; i < numWeapons; i++ ) {
+		const int weaponId = msg.ReadInt();
+		const int weaponSlot = msg.ReadBits( idMath::BitsForInteger( MAX_WEAPONS ) );
+		const int clip = msg.ReadBits( ASYNC_PLAYER_INV_CLIP_BITS );
+		const char *weaponClassName = player.spawnArgs.GetString( va( "def_weapon%d", weaponSlot ) );
+		inventory.AddWeapon( weaponClassName, weaponSlot, clip, weaponId );
+	}
+	player.ValidateWeaponAliases();
+}
+
+}
+
 idVec3 idPlayer::colorBarTable[ 5 ] = {
 	idVec3( 0.25f, 0.25f, 0.25f ),
 	idVec3( 1.00f, 0.00f, 0.00f ),
@@ -135,7 +190,9 @@ idInventory::Clear
 */
 void idInventory::Clear( void ) {
 	maxHealth		= 0;
-	weapons			= 0;
+	weaponInstances.Clear();
+	weaponInstanceIndex.Clear();
+	nextWeaponInstanceId = 1;
 	powerups		= 0;
 	armor			= 0;
 	maxarmor		= 0;
@@ -147,9 +204,6 @@ void idInventory::Clear( void ) {
 	memset( ammo, 0, sizeof( ammo ) );
 
 	ClearPowerUps();
-
-	// set to -1 so that the gun knows to have a full clip the first time we get it and at the start of the level
-	memset( clip, -1, sizeof( clip ) );
 
 	items.DeleteContents( true );
 	memset(pdasViewed, 0, 4 * sizeof( pdasViewed[0] ) );
@@ -221,6 +275,232 @@ void idInventory::ClearPowerUps( void ) {
 		powerupEndTime[ i ] = 0;
 	}
 	powerups = 0;
+}
+
+/*
+==============
+idInventory::AddWeapon
+==============
+*/
+int idInventory::AddWeapon( const char *weaponClassName, int weaponSlot, int clip, int requestedWeaponId ) {
+	if ( !weaponClassName || !*weaponClassName || weaponSlot < 0 || weaponSlot >= MAX_WEAPONS || weaponInstances.Num() >= MAX_WEAPON_INSTANCES ) {
+		return -1;
+	}
+
+	inventoryWeapon_t weapon;
+	weapon.id = ( requestedWeaponId > 0 ) ? requestedWeaponId : nextWeaponInstanceId++;
+	weapon.weaponClassName = weaponClassName;
+	weapon.weaponSlot = weaponSlot;
+	weapon.clip = clip;
+
+	if ( HasWeapon( weapon.id ) ) {
+		return -1;
+	}
+	if ( requestedWeaponId > 0 && nextWeaponInstanceId <= requestedWeaponId ) {
+		nextWeaponInstanceId = requestedWeaponId + 1;
+	}
+
+	const int index = weaponInstances.Append( weapon );
+	weaponInstanceIndex.Add( weapon.id, index );
+	return weapon.id;
+}
+
+/*
+==============
+idInventory::HasWeapon
+==============
+*/
+bool idInventory::HasWeapon( int weaponId ) const {
+	return GetWeapon( weaponId ) != NULL;
+}
+
+/*
+==============
+idInventory::HasWeaponInSlot
+==============
+*/
+bool idInventory::HasWeaponInSlot( int weaponSlot ) const {
+	return FindWeaponInSlot( weaponSlot ) >= 0;
+}
+
+/*
+==============
+idInventory::GetWeapon
+==============
+*/
+const inventoryWeapon_t *idInventory::GetWeapon( int weaponId ) const {
+	if ( weaponId <= 0 ) {
+		return NULL;
+	}
+
+	for( int index = weaponInstanceIndex.First( weaponId ); index != -1; index = weaponInstanceIndex.Next( index ) ) {
+		const inventoryWeapon_t &weapon = weaponInstances[ index ];
+		if ( weapon.id == weaponId ) {
+			return &weapon;
+		}
+	}
+	return NULL;
+}
+
+/*
+==============
+idInventory::GetWeaponSlot
+==============
+*/
+int idInventory::GetWeaponSlot( int weaponId ) const {
+	const inventoryWeapon_t *weapon = GetWeapon( weaponId );
+	return weapon ? weapon->weaponSlot : -1;
+}
+
+/*
+==============
+idInventory::GetWeaponClassName
+==============
+*/
+const char *idInventory::GetWeaponClassName( int weaponId ) const {
+	const inventoryWeapon_t *weapon = GetWeapon( weaponId );
+	return weapon ? weapon->weaponClassName.c_str() : "";
+}
+
+/*
+==============
+idInventory::GetWeaponClip
+==============
+*/
+int idInventory::GetWeaponClip( int weaponId ) const {
+	const inventoryWeapon_t *weapon = GetWeapon( weaponId );
+	return weapon ? weapon->clip : -1;
+}
+
+/*
+==============
+idInventory::SetWeaponClip
+==============
+*/
+bool idInventory::SetWeaponClip( int weaponId, int clip ) {
+	for( int index = weaponInstanceIndex.First( weaponId ); index != -1; index = weaponInstanceIndex.Next( index ) ) {
+		inventoryWeapon_t &weapon = weaponInstances[ index ];
+		if ( weapon.id == weaponId ) {
+			weapon.clip = clip;
+			return true;
+		}
+	}
+	return false;
+}
+
+/*
+==============
+idInventory::FindWeaponInSlot
+==============
+*/
+int idInventory::FindWeaponInSlot( int weaponSlot, int excludeWeaponId ) const {
+	int bestWeaponId = -1;
+
+	for( int i = 0; i < weaponInstances.Num(); i++ ) {
+		const inventoryWeapon_t *weapon = &weaponInstances[ i ];
+		if ( weapon->id == excludeWeaponId || weapon->weaponSlot != weaponSlot ) {
+			continue;
+		}
+		if ( bestWeaponId < 0 || weapon->id < bestWeaponId ) {
+			bestWeaponId = weapon->id;
+		}
+	}
+
+	return bestWeaponId;
+}
+
+/*
+==============
+idInventory::FindNewestWeaponInSlot
+==============
+*/
+int idInventory::FindNewestWeaponInSlot( int weaponSlot ) const {
+	int newestWeaponId = -1;
+
+	for( int i = 0; i < weaponInstances.Num(); i++ ) {
+		const inventoryWeapon_t &weapon = weaponInstances[ i ];
+		if ( weapon.weaponSlot == weaponSlot && weapon.id > newestWeaponId ) {
+			newestWeaponId = weapon.id;
+		}
+	}
+	return newestWeaponId;
+}
+
+/*
+==============
+idInventory::FindWeaponByClassName
+==============
+*/
+int idInventory::FindWeaponByClassName( const char *weaponClassName ) const {
+	int bestWeaponId = -1;
+
+	if ( !weaponClassName || !*weaponClassName ) {
+		return -1;
+	}
+
+	for( int i = 0; i < weaponInstances.Num(); i++ ) {
+		const inventoryWeapon_t *weapon = &weaponInstances[ i ];
+		if ( idStr::Icmp( weapon->weaponClassName, weaponClassName ) != 0 ) {
+			continue;
+		}
+		if ( bestWeaponId < 0 || weapon->id < bestWeaponId ) {
+			bestWeaponId = weapon->id;
+		}
+	}
+
+	return bestWeaponId;
+}
+
+/*
+==============
+idInventory::HasAmmoForWeapon
+==============
+*/
+bool idInventory::HasAmmoForWeapon( int weaponId ) const {
+	const inventoryWeapon_t *weapon = GetWeapon( weaponId );
+	return weapon && ( weapon->clip > 0 || HasAmmo( weapon->weaponClassName ) );
+}
+
+/*
+==============
+idInventory::GetNextWeaponInstanceId
+==============
+*/
+int idInventory::GetNextWeaponInstanceId( void ) const {
+	return nextWeaponInstanceId;
+}
+
+/*
+==============
+idInventory::GetNumWeapons
+==============
+*/
+int idInventory::GetNumWeapons( void ) const {
+	return weaponInstances.Num();
+}
+
+/*
+==============
+idInventory::GetSortedWeaponIdsById
+==============
+*/
+void idInventory::GetSortedWeaponIdsById( idList<int> &weaponIds ) const {
+	weaponIds.Clear();
+	for( int i = 0; i < weaponInstances.Num(); i++ ) {
+		InsertWeaponIdSorted( weaponIds, weaponInstances[ i ], *this, false );
+	}
+}
+
+/*
+==============
+idInventory::GetSortedWeaponIdsBySlot
+==============
+*/
+void idInventory::GetSortedWeaponIdsBySlot( idList<int> &weaponIds ) const {
+	weaponIds.Clear();
+	for( int i = 0; i < weaponInstances.Num(); i++ ) {
+		InsertWeaponIdSorted( weaponIds, weaponInstances[ i ], *this, true );
+	}
 }
 
 /*
@@ -301,7 +581,20 @@ void idInventory::GetPersistantData( idDict &dict ) {
 	dict.SetInt( "emails", emails.Num() );
 
 	// weapons
-	dict.SetInt( "weapon_bits", weapons );
+	idList<int> weaponIds;
+	GetSortedWeaponIdsById( weaponIds );
+	dict.SetInt( "weapon_instance_next_id", nextWeaponInstanceId );
+	dict.SetInt( "weapon_instance_count", weaponIds.Num() );
+	for( i = 0; i < weaponIds.Num(); i++ ) {
+		const inventoryWeapon_t *weapon = GetWeapon( weaponIds[ i ] );
+		if ( !weapon ) {
+			continue;
+		}
+		dict.SetInt( va( "weapon_instance_%i_id", i ), weapon->id );
+		dict.Set( va( "weapon_instance_%i_class", i ), weapon->weaponClassName );
+		dict.SetInt( va( "weapon_instance_%i_slot", i ), weapon->weaponSlot );
+		dict.SetInt( va( "weapon_instance_%i_clip", i ), weapon->clip );
+	}
 
 	dict.SetInt( "levelTriggers", levelTriggers.Num() );
 	for ( i = 0; i < levelTriggers.Num(); i++ ) {
@@ -398,13 +691,26 @@ void idInventory::RestoreInventory( idPlayer *owner, const idDict &dict ) {
 		emails[i] = dict.GetString( itemname, "default" );
 	}
 
-	// weapons are stored as a number for persistant data, but as strings in the entityDef
-	weapons	= dict.GetInt( "weapon_bits", "0" );
-
-	if ( g_skill.GetInteger() >= 3 ) {
-		Give( owner, dict, "weapon", dict.GetString( "weapon_nightmare" ), NULL, false );
+	// weapons are stored as explicit player-local instances in persistent data
+	if ( dict.FindKey( "weapon_instance_count" ) ) {
+		nextWeaponInstanceId = dict.GetInt( "weapon_instance_next_id", "1" );
+		if ( nextWeaponInstanceId < 1 ) {
+			nextWeaponInstanceId = 1;
+		}
+		num = dict.GetInt( "weapon_instance_count", "0" );
+		for( i = 0; i < num; i++ ) {
+			const int weaponId = dict.GetInt( va( "weapon_instance_%i_id", i ), "-1" );
+			const char *weaponClassName = dict.GetString( va( "weapon_instance_%i_class", i ) );
+			const int weaponSlot = dict.GetInt( va( "weapon_instance_%i_slot", i ), "-1" );
+			const int clip = dict.GetInt( va( "weapon_instance_%i_clip", i ), "-1" );
+			AddWeapon( weaponClassName, weaponSlot, clip, weaponId );
+		}
 	} else {
-		Give( owner, dict, "weapon", dict.GetString( "weapon" ), NULL, false );
+		if ( g_skill.GetInteger() >= 3 ) {
+			Give( owner, dict, "weapon", dict.GetString( "weapon_nightmare" ), NULL, false );
+		} else {
+			Give( owner, dict, "weapon", dict.GetString( "weapon" ), NULL, false );
+		}
 	}
 
 	num = dict.GetInt( "levelTriggers" );
@@ -426,9 +732,22 @@ idInventory::Save
 */
 void idInventory::Save( idSaveGame *savefile ) const {
 	int i;
+	idList<int> weaponIds;
 
 	savefile->WriteInt( maxHealth );
-	savefile->WriteInt( weapons );
+	savefile->WriteInt( nextWeaponInstanceId );
+	GetSortedWeaponIdsById( weaponIds );
+	savefile->WriteInt( weaponIds.Num() );
+	for( i = 0; i < weaponIds.Num(); i++ ) {
+		const inventoryWeapon_t *weapon = GetWeapon( weaponIds[ i ] );
+		if ( !weapon ) {
+			continue;
+		}
+		savefile->WriteInt( weapon->id );
+		savefile->WriteString( weapon->weaponClassName );
+		savefile->WriteInt( weapon->weaponSlot );
+		savefile->WriteInt( weapon->clip );
+	}
 	savefile->WriteInt( powerups );
 	savefile->WriteInt( armor );
 	savefile->WriteInt( maxarmor );
@@ -440,9 +759,6 @@ void idInventory::Save( idSaveGame *savefile ) const {
 
 	for( i = 0; i < AMMO_NUMTYPES; i++ ) {
 		savefile->WriteInt( ammo[ i ] );
-	}
-	for( i = 0; i < MAX_WEAPONS; i++ ) {
-		savefile->WriteInt( clip[ i ] );
 	}
 	for( i = 0; i < MAX_POWERUPS; i++ ) {
 		savefile->WriteInt( powerupEndTime[ i ] );
@@ -524,7 +840,32 @@ void idInventory::Restore( idRestoreGame *savefile ) {
 	int i, num;
 
 	savefile->ReadInt( maxHealth );
-	savefile->ReadInt( weapons );
+	weaponInstances.Clear();
+	weaponInstanceIndex.Clear();
+	nextWeaponInstanceId = 1;
+	if ( savefile->GetInternalSavegameVersion() >= 2 ) {
+		savefile->ReadInt( nextWeaponInstanceId );
+		if ( nextWeaponInstanceId < 1 ) {
+			nextWeaponInstanceId = 1;
+		}
+		savefile->ReadInt( num );
+		for( i = 0; i < num; i++ ) {
+			int weaponId;
+			idStr weaponClassName;
+			int weaponSlot;
+			int clip;
+
+			savefile->ReadInt( weaponId );
+			savefile->ReadString( weaponClassName );
+			savefile->ReadInt( weaponSlot );
+			savefile->ReadInt( clip );
+			AddWeapon( weaponClassName, weaponSlot, clip, weaponId );
+		}
+	} else {
+		int legacyWeaponBits;
+		savefile->ReadInt( legacyWeaponBits );
+		nextWeaponInstanceId = 1;
+	}
 	savefile->ReadInt( powerups );
 	savefile->ReadInt( armor );
 	savefile->ReadInt( maxarmor );
@@ -537,8 +878,11 @@ void idInventory::Restore( idRestoreGame *savefile ) {
 	for( i = 0; i < AMMO_NUMTYPES; i++ ) {
 		savefile->ReadInt( ammo[ i ] );
 	}
-	for( i = 0; i < MAX_WEAPONS; i++ ) {
-		savefile->ReadInt( clip[ i ] );
+	if ( savefile->GetInternalSavegameVersion() < 2 ) {
+		for( i = 0; i < MAX_WEAPONS; i++ ) {
+			int legacyClip;
+			savefile->ReadInt( legacyClip );
+		}
 	}
 	for( i = 0; i < MAX_POWERUPS; i++ ) {
 		savefile->ReadInt( powerupEndTime[ i ] );
@@ -692,7 +1036,7 @@ int idInventory::WeaponIndexForAmmoClass( const idDict & spawnArgs, const char *
 idInventory::AmmoIndexForWeaponClass
 ==============
 */
-ammo_t idInventory::AmmoIndexForWeaponClass( const char *weapon_classname, int *ammoRequired ) {
+ammo_t idInventory::AmmoIndexForWeaponClass( const char *weapon_classname, int *ammoRequired ) const {
 	const idDeclEntityDef *decl = gameLocal.FindEntityDef( weapon_classname, false );
 	if ( !decl ) {
 		gameLocal.Error( "Unknown weapon in decl '%s'", weapon_classname );
@@ -737,7 +1081,6 @@ bool idInventory::Give( idPlayer *owner, const idDict &spawnArgs, const char *st
 	int						len;
 	idStr					weaponString;
 	int						max;
-	const idDeclEntityDef	*weaponDecl;
 	bool					tookWeapon;
 	int						amount;
 	idItemInfo				info;
@@ -779,7 +1122,7 @@ bool idInventory::Give( idPlayer *owner, const idDict &spawnArgs, const char *st
 		i = WeaponIndexForAmmoClass( spawnArgs, statname + 7 );
 		if ( i != -1 ) {
 			// set, don't add. not going over the clip size limit.
-			clip[ i ] = atoi( value );
+			SetWeaponClip( FindNewestWeaponInSlot( i ), atoi( value ) );
 		}
 	} else if ( !idStr::Icmp( statname, "berserk" ) ) {
 		GivePowerUp( owner, BERSERK, SEC2MS( atof( value ) ) );
@@ -810,30 +1153,25 @@ bool idInventory::Give( idPlayer *owner, const idDict &spawnArgs, const char *st
 			}
 
 			// cache the media for this weapon
-			weaponDecl = gameLocal.FindEntityDef( weaponName, false );
-
-			// don't pickup "no ammo" weapon types twice
-			// not for D3 SP .. there is only one case in the game where you can get a no ammo
-			// weapon when you might already have it, in that case it is more conistent to pick it up
-			if ( gameLocal.isMultiplayer && weaponDecl && ( weapons & ( 1 << i ) ) && !weaponDecl->dict.GetInt( "ammoRequired" ) ) {
-				continue;
-			}
+			gameLocal.FindEntityDef( weaponName, false );
 
 			if ( !gameLocal.world->spawnArgs.GetBool( "no_Weapons" ) || ( weaponName == "weapon_fists" ) || ( weaponName == "weapon_soulcube" ) ) {
-				if ( ( weapons & ( 1 << i ) ) == 0 || gameLocal.isMultiplayer ) {
-					if ( owner->GetUserInfo()->GetBool( "ui_autoSwitch" ) && idealWeapon ) {
-						assert( !gameLocal.isClient );
-						*idealWeapon = i;
-					}
-					if ( owner->hud && updateHud && lastGiveTime + 1000 < gameLocal.time ) {
-						owner->hud->SetStateInt( "newWeapon", i );
-						owner->hud->HandleNamedEvent( "newWeapon" );
-						lastGiveTime = gameLocal.time;
-					}
-					weaponPulse = true;
-					weapons |= ( 1 << i );
-					tookWeapon = true;
+				const int weaponId = AddWeapon( weaponName, i );
+				if ( weaponId < 0 ) {
+					continue;
 				}
+				owner->SetDefaultWeaponAlias( i, weaponId );
+				if ( owner->GetUserInfo()->GetBool( "ui_autoSwitch" ) && idealWeapon ) {
+					assert( !gameLocal.isClient );
+					*idealWeapon = weaponId;
+				}
+				if ( owner->hud && updateHud && lastGiveTime + 1000 < gameLocal.time ) {
+					owner->hud->SetStateInt( "newWeapon", i );
+					owner->hud->HandleNamedEvent( "newWeapon" );
+					lastGiveTime = gameLocal.time;
+				}
+				weaponPulse = true;
+				tookWeapon = true;
 			}
 		}
 		return tookWeapon;
@@ -854,28 +1192,35 @@ bool idInventory::Give( idPlayer *owner, const idDict &spawnArgs, const char *st
 idInventoy::Drop
 ===============
 */
-void idInventory::Drop( const idDict &spawnArgs, const char *weapon_classname, int weapon_index ) {
-	// remove the weapon bit
-	// also remove the ammo associated with the weapon as we pushed it in the item
-	assert( weapon_index != -1 || weapon_classname );
-	if ( weapon_index == -1 ) {
-		for( weapon_index = 0; weapon_index < MAX_WEAPONS; weapon_index++ ) {
-			if ( !idStr::Icmp( weapon_classname, spawnArgs.GetString( va( "def_weapon%d", weapon_index ) ) ) ) {
-				break;
-			}
-		}
-		if ( weapon_index >= MAX_WEAPONS ) {
-			gameLocal.Error( "Unknown weapon '%s'", weapon_classname );
-		}
-	} else if ( !weapon_classname ) {
-		weapon_classname = spawnArgs.GetString( va( "def_weapon%d", weapon_index ) );
+void idInventory::Drop( idPlayer *owner, const char *weaponClassName, int weaponId ) {
+	assert( owner );
+	assert( weaponId > 0 || weaponClassName );
+
+	if ( weaponId <= 0 && weaponClassName ) {
+		weaponId = FindWeaponByClassName( weaponClassName );
 	}
-	weapons &= ( 0xffffffff ^ ( 1 << weapon_index ) );
-	ammo_t ammo_i = AmmoIndexForWeaponClass( weapon_classname, NULL );
-	if ( ammo_i ) {
-		clip[ weapon_index ] = -1;
-		ammo[ ammo_i ] = 0;
+
+	const inventoryWeapon_t *weapon = GetWeapon( weaponId );
+	if ( !weapon ) {
+		if ( weaponClassName && *weaponClassName ) {
+			gameLocal.Warning( "Cannot drop unknown weapon '%s'\n", weaponClassName );
+		}
+		return;
 	}
+
+	int weaponIndex = -1;
+	for( int index = weaponInstanceIndex.First( weaponId ); index != -1; index = weaponInstanceIndex.Next( index ) ) {
+		if ( weaponInstances[ index ].id == weaponId ) {
+			weaponIndex = index;
+			break;
+		}
+	}
+	if ( weaponIndex < 0 ) {
+		return;
+	}
+	weaponInstanceIndex.RemoveIndex( weaponId, weaponIndex );
+	weaponInstances.RemoveIndex( weaponIndex );
+	owner->RemoveWeaponAlias( weaponId );
 }
 
 /*
@@ -883,7 +1228,7 @@ void idInventory::Drop( const idDict &spawnArgs, const char *weapon_classname, i
 idInventory::HasAmmo
 ===============
 */
-int idInventory::HasAmmo( ammo_t type, int amount ) {
+int idInventory::HasAmmo( ammo_t type, int amount ) const {
 	if ( ( type == 0 ) || !amount ) {
 		// always allow weapons that don't use ammo to fire
 		return -1;
@@ -903,7 +1248,7 @@ int idInventory::HasAmmo( ammo_t type, int amount ) {
 idInventory::HasAmmo
 ===============
 */
-int idInventory::HasAmmo( const char *weapon_classname ) {
+int idInventory::HasAmmo( const char *weapon_classname ) const {
 	int ammoRequired;
 	ammo_t ammo_i = AmmoIndexForWeaponClass( weapon_classname, &ammoRequired );
 	return HasAmmo( ammo_i, ammoRequired );
@@ -1032,6 +1377,7 @@ idPlayer::idPlayer() {
 	currentWeapon			= -1;
 	idealWeapon				= -1;
 	previousWeapon			= -1;
+	ClearWeaponAliases();
 	weaponSwitchTime		=  0;
 	weaponEnabled			= true;
 	weapon_soulcube			= -1;
@@ -1532,7 +1878,7 @@ void idPlayer::Spawn( void ) {
 	}
 	if ( hud ) {
 		// We can spawn with a full soul cube, so we need to make sure the hud knows this
-		if ( weapon_soulcube > 0 && ( inventory.weapons & ( 1 << weapon_soulcube ) ) ) {
+		if ( weapon_soulcube > 0 && inventory.HasWeaponInSlot( weapon_soulcube ) ) {
 			int max_souls = inventory.MaxAmmoForAmmoClass( this, "ammo_souls" );
 			if ( inventory.ammo[ idWeapon::GetAmmoNumForName( "ammo_souls" ) ] >= max_souls ) {
 				hud->HandleNamedEvent( "soulCubeReady" );
@@ -1554,7 +1900,7 @@ void idPlayer::Spawn( void ) {
 		if ( weapon.GetEntity() ) {
 			weapon.GetEntity()->LowerWeapon();
 		}
-		idealWeapon = 0;
+		idealWeapon = inventory.FindWeaponInSlot( weapon_fists );
 	} else {
 		hiddenWeapon = false;
 	}
@@ -1728,6 +2074,9 @@ void idPlayer::Save( idSaveGame *savefile ) const {
 	savefile->WriteInt( currentWeapon );
 	savefile->WriteInt( idealWeapon );
 	savefile->WriteInt( previousWeapon );
+	for( i = 0; i < MAX_WEAPONS; i++ ) {
+		savefile->WriteInt( weaponAliases[ i ] );
+	}
 	savefile->WriteInt( weaponSwitchTime );
 	savefile->WriteBool( weaponEnabled );
 	savefile->WriteBool( showWeaponViewModel );
@@ -1960,6 +2309,14 @@ void idPlayer::Restore( idRestoreGame *savefile ) {
 	savefile->ReadInt( currentWeapon );
 	savefile->ReadInt( idealWeapon );
 	savefile->ReadInt( previousWeapon );
+	if ( savefile->GetInternalSavegameVersion() >= 2 ) {
+		for( i = 0; i < MAX_WEAPONS; i++ ) {
+			savefile->ReadInt( weaponAliases[ i ] );
+		}
+		ValidateWeaponAliases();
+	} else {
+		ClearWeaponAliases();
+	}
 	savefile->ReadInt( weaponSwitchTime );
 	savefile->ReadBool( weaponEnabled );
 	savefile->ReadBool( showWeaponViewModel );
@@ -2300,6 +2657,9 @@ void idPlayer::SavePersistantInfo( void ) {
 	inventory.GetPersistantData( playerInfo );
 	playerInfo.SetInt( "health", health );
 	playerInfo.SetInt( "current_weapon", currentWeapon );
+	for( int i = 0; i < MAX_WEAPONS; i++ ) {
+		playerInfo.SetInt( va( "weapon_alias_%i", i ), weaponAliases[ i ] );
+	}
 }
 
 /*
@@ -2316,10 +2676,34 @@ void idPlayer::RestorePersistantInfo( void ) {
 
 	spawnArgs.Copy( gameLocal.persistentPlayerInfo[entityNumber] );
 
+	ClearWeaponAliases();
 	inventory.RestoreInventory( this, spawnArgs );
+	idList<int> weaponIds;
+	inventory.GetSortedWeaponIdsById( weaponIds );
+	for( int i = 0; i < weaponIds.Num(); i++ ) {
+		const inventoryWeapon_t *weapon = inventory.GetWeapon( weaponIds[ i ] );
+		if ( weapon ) {
+			SetDefaultWeaponAlias( weapon->weaponSlot, weapon->id );
+		}
+	}
+	for( int i = 0; i < MAX_WEAPONS; i++ ) {
+		if ( spawnArgs.FindKey( va( "weapon_alias_%i", i ) ) ) {
+			weaponAliases[ i ] = spawnArgs.GetInt( va( "weapon_alias_%i", i ), "-1" );
+		}
+	}
+	ValidateWeaponAliases();
 	health = spawnArgs.GetInt( "health", "100" );
 	if ( !gameLocal.isClient ) {
-		idealWeapon = spawnArgs.GetInt( "current_weapon", "1" );
+		if ( spawnArgs.FindKey( "current_weapon" ) ) {
+			idealWeapon = spawnArgs.GetInt( "current_weapon", "-1" );
+		} else {
+			idealWeapon = ResolveWeaponAlias( 1 );
+		}
+		if ( !inventory.HasWeapon( idealWeapon ) ) {
+			idList<int> weaponIds;
+			inventory.GetSortedWeaponIdsBySlot( weaponIds );
+			idealWeapon = weaponIds.Num() ? weaponIds[ 0 ] : -1;
+		}
 	}
 }
 
@@ -2495,10 +2879,10 @@ void idPlayer::UpdateHudAmmo( idUserInterface *_hud ) {
 		_hud->SetStateString( "player_totalammo", "" );
 	} else {
 		// show remaining ammo
-		_hud->SetStateString( "player_totalammo", va( "%i", ammoamount - inclip ) );
+		_hud->SetStateString( "player_totalammo", va( "%i", ammoamount ) );
 		_hud->SetStateString( "player_ammo", weapon.GetEntity()->ClipSize() ? va( "%i", inclip ) : "--" );		// how much in the current clip
 		_hud->SetStateString( "player_clips", weapon.GetEntity()->ClipSize() ? va( "%i", ammoamount / weapon.GetEntity()->ClipSize() ) : "--" );
-		_hud->SetStateString( "player_allammo", va( "%i/%i", inclip, ammoamount - inclip ) );
+		_hud->SetStateString( "player_allammo", va( "%i/%i", inclip, ammoamount ) );
 	}
 
 	_hud->SetStateBool( "player_ammo_empty", ( ammoamount == 0 ) );
@@ -2592,12 +2976,12 @@ void idPlayer::UpdateHudWeapon( bool flashWeapon ) {
 		const char *weapnum = va( "def_weapon%d", i );
 		const char *hudWeap = va( "weapon%d", i );
 		int weapstate = 0;
-		if ( inventory.weapons & ( 1 << i ) ) {
+		if ( inventory.HasWeaponInSlot( i ) ) {
 			const char *weap = spawnArgs.GetString( weapnum );
 			if ( weap && *weap ) {
 				weapstate++;
 			}
-			if ( idealWeapon == i ) {
+			if ( inventory.GetWeaponSlot( idealWeapon ) == i ) {
 				weapstate++;
 			}
 		}
@@ -2797,11 +3181,11 @@ void idPlayer::FireWeapon( void ) {
 		if ( weapon.GetEntity()->AmmoInClip() || weapon.GetEntity()->AmmoAvailable() ) {
 			AI_ATTACK_HELD = true;
 			weapon.GetEntity()->BeginAttack();
-			if ( ( weapon_soulcube >= 0 ) && ( currentWeapon == weapon_soulcube ) ) {
+			if ( ( weapon_soulcube >= 0 ) && ( inventory.GetWeaponSlot( currentWeapon ) == weapon_soulcube ) ) {
 				if ( hud ) {
 					hud->HandleNamedEvent( "soulCubeNotReady" );
 				}
-				SelectWeapon( previousWeapon, false );
+				SelectWeapon( previousWeapon );
 			}
 		} else {
 			NextBestWeapon();
@@ -2826,22 +3210,18 @@ idPlayer::CacheWeapons
 ===============
 */
 void idPlayer::CacheWeapons( void ) {
-	idStr	weap;
-	int		w;
+	idList<int> weaponIds;
 
 	// check if we have any weapons
-	if ( !inventory.weapons ) {
+	if ( inventory.GetNumWeapons() == 0 ) {
 		return;
 	}
 
-	for( w = 0; w < MAX_WEAPONS; w++ ) {
-		if ( inventory.weapons & ( 1 << w ) ) {
-			weap = spawnArgs.GetString( va( "def_weapon%d", w ) );
-			if ( weap != "" ) {
-				idWeapon::CacheWeapon( weap );
-			} else {
-				inventory.weapons &= ~( 1 << w );
-			}
+	inventory.GetSortedWeaponIdsById( weaponIds );
+	for( int i = 0; i < weaponIds.Num(); i++ ) {
+		const inventoryWeapon_t *weapon = inventory.GetWeapon( weaponIds[ i ] );
+		if ( weapon && weapon->weaponClassName.Length() ) {
+			idWeapon::CacheWeapon( weapon->weaponClassName );
 		}
 	}
 }
@@ -2949,6 +3329,15 @@ bool idPlayer::GiveItem( idItem *item ) {
 	numPickup = inventory.pickupItemNames.Num();
 	for( i = 0; i < attr.GetNumKeyVals(); i++ ) {
 		arg = attr.GetKeyVal( i );
+		if ( !idStr::Icmp( arg->GetKey(), "weapon" ) && Give( arg->GetKey(), arg->GetValue() ) ) {
+			gave = true;
+		}
+	}
+	for( i = 0; i < attr.GetNumKeyVals(); i++ ) {
+		arg = attr.GetKeyVal( i );
+		if ( !idStr::Icmp( arg->GetKey(), "weapon" ) ) {
+			continue;
+		}
 		if ( Give( arg->GetKey(), arg->GetValue() ) ) {
 			gave = true;
 		}
@@ -3058,7 +3447,7 @@ bool idPlayer::GivePowerUp( int powerup, int time ) {
 					powerUpSkin = declManager->FindSkin( baseSkinName + "_berserk" );
 				}
 				if ( !gameLocal.isClient ) {
-					idealWeapon = 0;
+					idealWeapon = inventory.FindWeaponInSlot( weapon_fists );
 				}
 				break;
 			}
@@ -3500,37 +3889,36 @@ idPlayer::NextBestWeapon
 ===============
 */
 void idPlayer::NextBestWeapon( void ) {
-	const char *weap;
-	int w = MAX_WEAPONS;
-
 	if ( gameLocal.isClient || !weaponEnabled ) {
 		return;
 	}
 
-	while ( w > 0 ) {
-		w--;
-		weap = spawnArgs.GetString( va( "def_weapon%d", w ) );
-		if ( !weap[ 0 ] || ( ( inventory.weapons & ( 1 << w ) ) == 0 ) || ( !inventory.HasAmmo( weap ) ) ) {
+	idList<int> weaponIds;
+	inventory.GetSortedWeaponIdsBySlot( weaponIds );
+	int bestWeaponId = -1;
+	for( int i = weaponIds.Num() - 1; i >= 0; i-- ) {
+		const inventoryWeapon_t *weapon = inventory.GetWeapon( weaponIds[ i ] );
+		if ( !weapon || !inventory.HasAmmoForWeapon( weapon->id ) ) {
 			continue;
 		}
-		if ( !spawnArgs.GetBool( va( "weapon%d_best", w ) ) ) {
+		if ( !spawnArgs.GetBool( va( "weapon%d_best", weapon->weaponSlot ) ) ) {
 			continue;
 		}
+		bestWeaponId = weapon->id;
 		break;
 	}
-	idealWeapon = w;
-	weaponSwitchTime = gameLocal.time + WEAPON_SWITCH_DELAY;
-	UpdateHudWeapon();
+	if ( bestWeaponId < 0 ) {
+		bestWeaponId = inventory.FindWeaponInSlot( weapon_fists );
+	}
+	if ( bestWeaponId > 0 ) {
+		idealWeapon = bestWeaponId;
+		weaponSwitchTime = gameLocal.time + WEAPON_SWITCH_DELAY;
+		UpdateHudWeapon();
+	}
 }
 
-/*
-===============
-idPlayer::NextWeapon
-===============
-*/
 void idPlayer::NextWeapon( void ) {
-	const char *weap;
-	int w;
+	idList<int> weaponIds;
 
 	if ( !weaponEnabled || spectating || hiddenWeapon || gameLocal.inCinematic || gameLocal.world->spawnArgs.GetBool( "no_Weapons" ) || health < 0 ) {
 		return;
@@ -3540,36 +3928,35 @@ void idPlayer::NextWeapon( void ) {
 		return;
 	}
 
-	// check if we have any weapons
-	if ( !inventory.weapons ) {
+	inventory.GetSortedWeaponIdsBySlot( weaponIds );
+	if ( weaponIds.Num() == 0 ) {
 		return;
 	}
 
-	w = idealWeapon;
-	while( 1 ) {
-		w++;
-		if ( w >= MAX_WEAPONS ) {
-			w = 0;
-		}
-		weap = spawnArgs.GetString( va( "def_weapon%d", w ) );
-		if ( !spawnArgs.GetBool( va( "weapon%d_cycle", w ) ) ) {
-			continue;
-		}
-		if ( !weap[ 0 ] ) {
-			continue;
-		}
-		if ( ( inventory.weapons & ( 1 << w ) ) == 0 ) {
-			continue;
-		}
-		if ( inventory.HasAmmo( weap ) ) {
-			break;
-		}
+	int startIndex = weaponIds.FindIndex( idealWeapon );
+	if ( startIndex < 0 ) {
+		startIndex = weaponIds.FindIndex( currentWeapon );
 	}
 
-	if ( ( w != currentWeapon ) && ( w != idealWeapon ) ) {
-		idealWeapon = w;
-		weaponSwitchTime = gameLocal.time + WEAPON_SWITCH_DELAY;
-		UpdateHudWeapon();
+	for( int i = 1; i <= weaponIds.Num(); i++ ) {
+		const int index = ( ( startIndex < 0 ? -1 : startIndex ) + i ) % weaponIds.Num();
+		const int weaponId = weaponIds[ index ];
+		const inventoryWeapon_t *weapon = inventory.GetWeapon( weaponId );
+		if ( !weapon ) {
+			continue;
+		}
+		if ( !spawnArgs.GetBool( va( "weapon%d_cycle", weapon->weaponSlot ) ) ) {
+			continue;
+		}
+		if ( !weapon->weaponClassName.Length() ) {
+			continue;
+		}
+		if ( ( weaponId != currentWeapon ) && ( weaponId != idealWeapon ) ) {
+			idealWeapon = weaponId;
+			weaponSwitchTime = gameLocal.time + WEAPON_SWITCH_DELAY;
+			UpdateHudWeapon();
+		}
+		return;
 	}
 }
 
@@ -3579,8 +3966,7 @@ idPlayer::PrevWeapon
 ===============
 */
 void idPlayer::PrevWeapon( void ) {
-	const char *weap;
-	int w;
+	idList<int> weaponIds;
 
 	if ( !weaponEnabled || spectating || hiddenWeapon || gameLocal.inCinematic || gameLocal.world->spawnArgs.GetBool( "no_Weapons" ) || health < 0 ) {
 		return;
@@ -3590,36 +3976,40 @@ void idPlayer::PrevWeapon( void ) {
 		return;
 	}
 
-	// check if we have any weapons
-	if ( !inventory.weapons ) {
+	inventory.GetSortedWeaponIdsBySlot( weaponIds );
+	if ( weaponIds.Num() == 0 ) {
 		return;
 	}
 
-	w = idealWeapon;
-	while( 1 ) {
-		w--;
-		if ( w < 0 ) {
-			w = MAX_WEAPONS - 1;
-		}
-		weap = spawnArgs.GetString( va( "def_weapon%d", w ) );
-		if ( !spawnArgs.GetBool( va( "weapon%d_cycle", w ) ) ) {
-			continue;
-		}
-		if ( !weap[ 0 ] ) {
-			continue;
-		}
-		if ( ( inventory.weapons & ( 1 << w ) ) == 0 ) {
-			continue;
-		}
-		if ( inventory.HasAmmo( weap ) ) {
-			break;
-		}
+	int startIndex = weaponIds.FindIndex( idealWeapon );
+	if ( startIndex < 0 ) {
+		startIndex = weaponIds.FindIndex( currentWeapon );
 	}
 
-	if ( ( w != currentWeapon ) && ( w != idealWeapon ) ) {
-		idealWeapon = w;
-		weaponSwitchTime = gameLocal.time + WEAPON_SWITCH_DELAY;
-		UpdateHudWeapon();
+	for( int i = 1; i <= weaponIds.Num(); i++ ) {
+		int index;
+		if ( startIndex < 0 ) {
+			index = weaponIds.Num() - i;
+		} else {
+			index = ( startIndex - i + weaponIds.Num() ) % weaponIds.Num();
+		}
+		const int weaponId = weaponIds[ index ];
+		const inventoryWeapon_t *weapon = inventory.GetWeapon( weaponId );
+		if ( !weapon ) {
+			continue;
+		}
+		if ( !spawnArgs.GetBool( va( "weapon%d_cycle", weapon->weaponSlot ) ) ) {
+			continue;
+		}
+		if ( !weapon->weaponClassName.Length() ) {
+			continue;
+		}
+		if ( ( weaponId != currentWeapon ) && ( weaponId != idealWeapon ) ) {
+			idealWeapon = weaponId;
+			weaponSwitchTime = gameLocal.time + WEAPON_SWITCH_DELAY;
+			UpdateHudWeapon();
+		}
+		return;
 	}
 }
 
@@ -3628,14 +4018,12 @@ void idPlayer::PrevWeapon( void ) {
 idPlayer::SelectWeapon
 ===============
 */
-void idPlayer::SelectWeapon( int num, bool force ) {
-	const char *weap;
-
+void idPlayer::SelectWeapon( int weaponId ) {
 	if ( !weaponEnabled || spectating || gameLocal.inCinematic || health < 0 ) {
 		return;
 	}
 
-	if ( ( num < 0 ) || ( num >= MAX_WEAPONS ) ) {
+	if ( weaponId <= 0 ) {
 		return;
 	}
 
@@ -3643,8 +4031,22 @@ void idPlayer::SelectWeapon( int num, bool force ) {
 		return;
 	}
 
-	if ( ( num != weapon_pda ) && gameLocal.world->spawnArgs.GetBool( "no_Weapons" ) ) {
-		num = weapon_fists;
+	const inventoryWeapon_t *selectedWeapon = inventory.GetWeapon( weaponId );
+	if ( !selectedWeapon ) {
+		return;
+	}
+
+	int weaponSlot = selectedWeapon->weaponSlot;
+	const char *weap = selectedWeapon->weaponClassName.c_str();
+
+	if ( ( weaponSlot != weapon_pda ) && gameLocal.world->spawnArgs.GetBool( "no_Weapons" ) ) {
+		weaponId = inventory.FindWeaponInSlot( weapon_fists );
+		selectedWeapon = inventory.GetWeapon( weaponId );
+		if ( !selectedWeapon ) {
+			return;
+		}
+		weaponSlot = selectedWeapon->weaponSlot;
+		weap = selectedWeapon->weaponClassName.c_str();
 		hiddenWeapon ^= 1;
 		if ( hiddenWeapon && weapon.GetEntity() ) {
 			weapon.GetEntity()->LowerWeapon();
@@ -3653,29 +4055,137 @@ void idPlayer::SelectWeapon( int num, bool force ) {
 		}
 	}
 
-	weap = spawnArgs.GetString( va( "def_weapon%d", num ) );
 	if ( !weap[ 0 ] ) {
 		gameLocal.Printf( "Invalid weapon\n" );
 		return;
 	}
 
-	if ( force || ( inventory.weapons & ( 1 << num ) ) ) {
-		if ( !inventory.HasAmmo( weap ) && !spawnArgs.GetBool( va( "weapon%d_allowempty", num ) ) ) {
-			return;
-		}
-		if ( ( previousWeapon >= 0 ) && ( idealWeapon == num ) && ( spawnArgs.GetBool( va( "weapon%d_toggle", num ) ) ) ) {
-			weap = spawnArgs.GetString( va( "def_weapon%d", previousWeapon ) );
-			if ( !inventory.HasAmmo( weap ) && !spawnArgs.GetBool( va( "weapon%d_allowempty", previousWeapon ) ) ) {
+	if ( inventory.HasWeapon( weaponId ) ) {
+		if ( ( previousWeapon > 0 ) && ( idealWeapon == weaponId ) && ( spawnArgs.GetBool( va( "weapon%d_toggle", weaponSlot ) ) ) ) {
+			const inventoryWeapon_t *previous = inventory.GetWeapon( previousWeapon );
+			if ( !previous ) {
 				return;
 			}
 			idealWeapon = previousWeapon;
-		} else if ( ( weapon_pda >= 0 ) && ( num == weapon_pda ) && ( inventory.pdas.Num() == 0 ) ) {
+		} else if ( ( weapon_pda >= 0 ) && ( weaponSlot == weapon_pda ) && ( inventory.pdas.Num() == 0 ) ) {
 			ShowTip( spawnArgs.GetString( "text_infoTitle" ), spawnArgs.GetString( "text_noPDA" ), true );
 			return;
 		} else {
-			idealWeapon = num;
+			idealWeapon = weaponId;
 		}
 		UpdateHudWeapon();
+	}
+}
+
+/*
+===============
+idPlayer::GetCurrentWeaponId
+===============
+*/
+int idPlayer::GetCurrentWeaponId( void ) const {
+	return currentWeapon;
+}
+
+/*
+===============
+idPlayer::GetIdealWeaponId
+===============
+*/
+int idPlayer::GetIdealWeaponId( void ) const {
+	return idealWeapon;
+}
+
+/*
+===============
+idPlayer::GetWeaponAlias
+===============
+*/
+int idPlayer::GetWeaponAlias( int impulseSlot ) const {
+	if ( impulseSlot < 0 || impulseSlot >= MAX_WEAPONS ) {
+		return -1;
+	}
+	return weaponAliases[ impulseSlot ];
+}
+
+/*
+===============
+idPlayer::ResolveWeaponAlias
+===============
+*/
+int idPlayer::ResolveWeaponAlias( int impulseSlot ) const {
+	const int weaponId = GetWeaponAlias( impulseSlot );
+	return inventory.HasWeapon( weaponId ) ? weaponId : -1;
+}
+
+/*
+===============
+idPlayer::BindWeaponAlias
+===============
+*/
+bool idPlayer::BindWeaponAlias( int impulseSlot, int weaponId ) {
+	if ( impulseSlot < 0 || impulseSlot >= MAX_WEAPONS || !inventory.HasWeapon( weaponId ) ) {
+		return false;
+	}
+	weaponAliases[ impulseSlot ] = weaponId;
+	return true;
+}
+
+/*
+===============
+idPlayer::ClearWeaponAlias
+===============
+*/
+void idPlayer::ClearWeaponAlias( int impulseSlot ) {
+	if ( impulseSlot >= 0 && impulseSlot < MAX_WEAPONS ) {
+		weaponAliases[ impulseSlot ] = -1;
+	}
+}
+
+/*
+===============
+idPlayer::ClearWeaponAliases
+===============
+*/
+void idPlayer::ClearWeaponAliases( void ) {
+	for( int i = 0; i < MAX_WEAPONS; i++ ) {
+		weaponAliases[ i ] = -1;
+	}
+}
+
+/*
+===============
+idPlayer::SetDefaultWeaponAlias
+===============
+*/
+void idPlayer::SetDefaultWeaponAlias( int impulseSlot, int weaponId ) {
+	if ( impulseSlot >= 0 && impulseSlot < MAX_WEAPONS && !inventory.HasWeapon( weaponAliases[ impulseSlot ] ) ) {
+		weaponAliases[ impulseSlot ] = weaponId;
+	}
+}
+
+/*
+===============
+idPlayer::ValidateWeaponAliases
+===============
+*/
+void idPlayer::ValidateWeaponAliases( void ) {
+	for( int i = 0; i < MAX_WEAPONS; i++ ) {
+		if ( !inventory.HasWeapon( weaponAliases[ i ] ) ) {
+			weaponAliases[ i ] = -1;
+		}
+	}
+}
+
+/*
+===============
+idPlayer::RemoveWeaponAlias
+===============
+*/
+void idPlayer::RemoveWeaponAlias( int weaponId ) {
+	for( int i = 0; i < MAX_WEAPONS; i++ ) {
+		if ( weaponAliases[ i ] == weaponId ) {
+			weaponAliases[ i ] = -1;
+		}
 	}
 }
 
@@ -3697,24 +4207,16 @@ void idPlayer::DropWeapon( bool died ) {
 	if ( ( !died && !weapon.GetEntity()->IsReady() ) || weapon.GetEntity()->IsReloading() ) {
 		return;
 	}
-	// ammoavailable is how many shots we can fire
+	// ammoavailable is the shared reserve; loaded ammo belongs to this instance
 	// inclip is which amount is in clip right now
 	ammoavailable = weapon.GetEntity()->AmmoAvailable();
 	inclip = weapon.GetEntity()->AmmoInClip();
 
 	// don't drop a grenade if we have none left
-	if ( !idStr::Icmp( idWeapon::GetAmmoNameForNum( weapon.GetEntity()->GetAmmoType() ), "ammo_grenades" ) && ( ammoavailable - inclip <= 0 ) ) {
+	if ( !idStr::Icmp( idWeapon::GetAmmoNameForNum( weapon.GetEntity()->GetAmmoType() ), "ammo_grenades" ) && ( ammoavailable + inclip <= 0 ) ) {
 		return;
 	}
 
-	// expect an ammo setup that makes sense before doing any dropping
-	// ammoavailable is -1 for infinite ammo, and weapons like chainsaw
-	// a bad ammo config usually indicates a bad weapon state, so we should not drop
-	// used to be an assertion check, but it still happens in edge cases
-	if ( ( ammoavailable != -1 ) && ( ammoavailable - inclip < 0 ) ) {
-		common->DPrintf( "idPlayer::DropWeapon: bad ammo setup\n" );
-		return;
-	}
 	idEntity *item = NULL;
 	if ( died ) {
 		// ain't gonna throw you no weapon if I'm dead
@@ -3726,19 +4228,27 @@ void idPlayer::DropWeapon( bool died ) {
 	if ( !item ) {
 		return;
 	}
-	// set the appropriate ammo in the dropped object
+	// Dropped weapons are empty. The active magazine returns to the owner's reserve below.
 	const idKeyValue * keyval = item->spawnArgs.MatchPrefix( "inv_ammo_" );
 	if ( keyval ) {
-		item->spawnArgs.SetInt( keyval->GetKey(), ammoavailable );
+		item->spawnArgs.SetInt( keyval->GetKey(), 0 );
 		idStr inclipKey = keyval->GetKey();
 		inclipKey.Insert( "inclip_", 4 );
-		item->spawnArgs.SetInt( inclipKey, inclip );
+		item->spawnArgs.SetInt( inclipKey, 0 );
 	}
 	if ( !died ) {
+		const ammo_t droppedAmmoType = weapon.GetEntity()->GetAmmoType();
+		if ( droppedAmmoType > 0 && inclip > 0 && inventory.ammo[ droppedAmmoType ] >= 0 ) {
+			inventory.ammo[ droppedAmmoType ] += inclip;
+		}
 		// remove from our local inventory completely
-		inventory.Drop( spawnArgs, item->spawnArgs.GetString( "inv_weapon" ), -1 );
+		const int droppedWeapon = currentWeapon;
+		inventory.Drop( this, item->spawnArgs.GetString( "inv_weapon" ), droppedWeapon );
 		weapon.GetEntity()->ResetAmmoClip();
 		NextWeapon();
+		if ( idealWeapon == droppedWeapon || !inventory.HasWeapon( idealWeapon ) ) {
+			idealWeapon = inventory.FindWeaponInSlot( weapon_fists );
+		}
 		weapon.GetEntity()->WeaponStolen();
 		weaponGone = true;
 	}
@@ -3760,42 +4270,32 @@ void idPlayer::StealWeapon( idPlayer *player ) {
 	}
 	// steal - we need to effectively force the other player to abandon his weapon
 	int newweap = player->currentWeapon;
-	if ( newweap == -1 ) {
+	if ( newweap <= 0 ) {
 		return;
 	}
 	// might be just dropped - check inventory
-	if ( ! ( player->inventory.weapons & ( 1 << newweap ) ) ) {
+	const inventoryWeapon_t *stolenWeapon = player->inventory.GetWeapon( newweap );
+	if ( !stolenWeapon ) {
 		return;
 	}
-	const char *weapon_classname = spawnArgs.GetString( va( "def_weapon%d", newweap ) );
-	assert( weapon_classname );
-	int ammoavailable = player->weapon.GetEntity()->AmmoAvailable();
-	int inclip = player->weapon.GetEntity()->AmmoInClip();
-	if ( ( ammoavailable != -1 ) && ( ammoavailable - inclip < 0 ) ) {
-		// see DropWeapon
-		common->DPrintf( "idPlayer::StealWeapon: bad ammo setup\n" );
-		// we still steal the weapon, so let's use the default ammo levels
-		inclip = -1;
-		const idDeclEntityDef *decl = gameLocal.FindEntityDef( weapon_classname );
-		assert( decl );
-		const idKeyValue *keypair = decl->dict.MatchPrefix( "inv_ammo_" );
-		assert( keypair );
-		ammoavailable = atoi( keypair->GetValue() );
-	}
+	const idStr weaponClassName = stolenWeapon->weaponClassName;
+	const int inclip = player->weapon.GetEntity()->AmmoInClip();
 
 	player->weapon.GetEntity()->WeaponStolen();
-	player->inventory.Drop( player->spawnArgs, NULL, newweap );
-	player->SelectWeapon( weapon_fists, false );
+	player->inventory.Drop( player, NULL, newweap );
+	const int fistsWeapon = player->inventory.FindWeaponInSlot( player->weapon_fists );
+	if ( fistsWeapon > 0 ) {
+		player->SelectWeapon( fistsWeapon );
+	}
 	// in case the robbed player is firing rounds with a continuous fire weapon like the chaingun/plasma etc.
 	// this will ensure the firing actually stops
 	player->weaponGone = true;
 
 	// give weapon, setup the ammo count
-	Give( "weapon", weapon_classname );
-	ammo_t ammo_i = player->inventory.AmmoIndexForWeaponClass( weapon_classname, NULL );
-	idealWeapon = newweap;
-	inventory.ammo[ ammo_i ] += ammoavailable;
-	inventory.clip[ newweap ] = inclip;
+	const int newWeaponId = inventory.GetNextWeaponInstanceId();
+	Give( "weapon", weaponClassName );
+	idealWeapon = inventory.HasWeapon( newWeaponId ) ? newWeaponId : inventory.FindWeaponByClassName( weaponClassName );
+	inventory.SetWeaponClip( idealWeapon, inclip );
 }
 
 /*
@@ -3832,18 +4332,23 @@ void idPlayer::Weapon_Combat( void ) {
 		AI_RELOAD = false;
 	}
 
-	if ( idealWeapon == weapon_soulcube && soulCubeProjectile.GetEntity() != NULL ) {
+	if ( inventory.GetWeaponSlot( idealWeapon ) == weapon_soulcube && soulCubeProjectile.GetEntity() != NULL ) {
 		idealWeapon = currentWeapon;
 	}
 
 	if ( idealWeapon != currentWeapon ) {
+		const inventoryWeapon_t *ideal = inventory.GetWeapon( idealWeapon );
+		if ( !ideal ) {
+			idealWeapon = currentWeapon;
+			return;
+		}
 		if ( weaponCatchup ) {
 			assert( gameLocal.isClient );
 
 			currentWeapon = idealWeapon;
 			weaponGone = false;
-			animPrefix = spawnArgs.GetString( va( "def_weapon%d", currentWeapon ) );
-			weapon.GetEntity()->GetWeaponDef( animPrefix, inventory.clip[ currentWeapon ] );
+			animPrefix = ideal->weaponClassName;
+			weapon.GetEntity()->GetWeaponDef( animPrefix, ideal->clip );
 			animPrefix.Strip( "weapon_" );
 
 			weapon.GetEntity()->NetCatchup();
@@ -3860,15 +4365,15 @@ void idPlayer::Weapon_Combat( void ) {
 
 			if ( weapon.GetEntity()->IsHolstered() ) {
 				assert( idealWeapon >= 0 );
-				assert( idealWeapon < MAX_WEAPONS );
 
-				if ( currentWeapon != weapon_pda && !spawnArgs.GetBool( va( "weapon%d_toggle", currentWeapon ) ) ) {
+				const inventoryWeapon_t *current = inventory.GetWeapon( currentWeapon );
+				if ( current && current->weaponSlot != weapon_pda && !spawnArgs.GetBool( va( "weapon%d_toggle", current->weaponSlot ) ) ) {
 					previousWeapon = currentWeapon;
 				}
 				currentWeapon = idealWeapon;
 				weaponGone = false;
-				animPrefix = spawnArgs.GetString( va( "def_weapon%d", currentWeapon ) );
-				weapon.GetEntity()->GetWeaponDef( animPrefix, inventory.clip[ currentWeapon ] );
+				animPrefix = ideal->weaponClassName;
+				weapon.GetEntity()->GetWeaponDef( animPrefix, ideal->clip );
 				animPrefix.Strip( "weapon_" );
 
 				weapon.GetEntity()->Raise();
@@ -3877,15 +4382,10 @@ void idPlayer::Weapon_Combat( void ) {
 	} else {
 		weaponGone = false;	// if you drop and re-get weap, you may miss the = false above
 		if ( weapon.GetEntity()->IsHolstered() ) {
-			if ( !weapon.GetEntity()->AmmoAvailable() ) {
-				// weapons can switch automatically if they have no more ammo
-				NextBestWeapon();
-			} else {
-				weapon.GetEntity()->Raise();
-				state = GetScriptFunction( "RaiseWeapon" );
-				if ( state ) {
-					SetState( state );
-				}
+			weapon.GetEntity()->Raise();
+			state = GetScriptFunction( "RaiseWeapon" );
+			if ( state ) {
+				SetState( state );
 			}
 		}
 	}
@@ -3902,8 +4402,9 @@ void idPlayer::Weapon_Combat( void ) {
 	}
 
 	// update our ammo clip in our inventory
-	if ( ( currentWeapon >= 0 ) && ( currentWeapon < MAX_WEAPONS ) ) {
-		inventory.clip[ currentWeapon ] = weapon.GetEntity()->AmmoInClip();
+	const int currentWeaponSlot = inventory.GetWeaponSlot( currentWeapon );
+	if ( currentWeaponSlot >= 0 ) {
+		inventory.SetWeaponClip( currentWeapon, weapon.GetEntity()->AmmoInClip() );
 		if ( hud && ( currentWeapon == idealWeapon ) ) {
 			UpdateHudAmmo( hud );
 		}
@@ -4037,9 +4538,10 @@ void idPlayer::UpdateWeapon( void ) {
 
 	// always make sure the weapon is correctly setup before accessing it
 	if ( !weapon.GetEntity()->IsLinked() ) {
-		if ( idealWeapon != -1 ) {
-			animPrefix = spawnArgs.GetString( va( "def_weapon%d", idealWeapon ) );
-			weapon.GetEntity()->GetWeaponDef( animPrefix, inventory.clip[ idealWeapon ] );
+		const inventoryWeapon_t *ideal = inventory.GetWeapon( idealWeapon );
+		if ( ideal ) {
+			animPrefix = ideal->weaponClassName;
+			weapon.GetEntity()->GetWeaponDef( animPrefix, ideal->clip );
 			assert( weapon.GetEntity()->IsLinked() );
 		} else {
 			return;
@@ -5402,7 +5904,7 @@ void idPlayer::TogglePDA( void ) {
 			const char *weapnum = va( "def_weapon%d", j );
 			const char *hudWeap = va( "weapon%d", j );
 			int weapstate = 0;
-			if ( inventory.weapons & ( 1 << j ) ) {
+			if ( inventory.HasWeaponInSlot( j ) ) {
 				const char *weap = spawnArgs.GetString( weapnum );
 				if ( weap && *weap ) {
 					weapstate++;
@@ -5549,21 +6051,35 @@ idPlayer::PerformImpulse
 ==============
 */
 void idPlayer::PerformImpulse( int impulse ) {
+	if ( impulse >= IMPULSE_0 && impulse <= IMPULSE_12 ) {
+		if ( !gameLocal.isClient && gameLocal.isMultiplayer && entityNumber != gameLocal.localClientNum ) {
+			return;
+		}
+		const int weaponId = ResolveWeaponAlias( impulse - IMPULSE_0 );
+		if ( weaponId > 0 ) {
+			if ( gameLocal.isClient ) {
+				idBitMsg msg;
+				byte msgBuf[ MAX_EVENT_PARAM_SIZE ];
+				msg.Init( msgBuf, sizeof( msgBuf ) );
+				msg.BeginWriting();
+				msg.WriteInt( weaponId );
+				ClientSendEvent( EVENT_SELECT_WEAPON, &msg );
+			} else {
+				SelectWeapon( weaponId );
+			}
+		}
+		return;
+	}
 
 	if ( gameLocal.isClient ) {
-		idBitMsg	msg;
-		byte		msgBuf[MAX_EVENT_PARAM_SIZE];
+		idBitMsg msg;
+		byte msgBuf[ MAX_EVENT_PARAM_SIZE ];
 
 		assert( entityNumber == gameLocal.localClientNum );
 		msg.Init( msgBuf, sizeof( msgBuf ) );
 		msg.BeginWriting();
 		msg.WriteBits( impulse, 6 );
 		ClientSendEvent( EVENT_IMPULSE, &msg );
-	}
-
-	if ( impulse >= IMPULSE_0 && impulse <= IMPULSE_12 ) {
-		SelectWeapon( impulse, false );
-		return;
 	}
 
 	switch( impulse ) {
@@ -5596,7 +6112,10 @@ void idPlayer::PerformImpulse( int impulse ) {
 				if ( objectiveSystemOpen ) {
 					TogglePDA();
 				} else if ( weapon_pda >= 0 ) {
-					SelectWeapon( weapon_pda, true );
+					const int pdaWeapon = inventory.FindWeaponInSlot( weapon_pda );
+					if ( pdaWeapon > 0 ) {
+						SelectWeapon( pdaWeapon );
+					}
 				}
 			}
 			break;
@@ -7387,7 +7906,7 @@ void idPlayer::AddAIKill( void ) {
 	int max_souls;
 	int ammo_souls;
 
-	if ( ( weapon_soulcube < 0 ) || ( inventory.weapons & ( 1 << weapon_soulcube ) ) == 0 ) {
+	if ( ( weapon_soulcube < 0 ) || !inventory.HasWeaponInSlot( weapon_soulcube ) ) {
 		return;
 	}
 
@@ -7635,11 +8154,10 @@ idPlayer::Event_GetCurrentWeapon
 ==================
 */
 void idPlayer::Event_GetCurrentWeapon( void ) {
-	const char *weapon;
+	const inventoryWeapon_t *weapon = inventory.GetWeapon( currentWeapon );
 
-	if ( currentWeapon >= 0 ) {
-		weapon = spawnArgs.GetString( va( "def_weapon%d", currentWeapon ) );
-		idThread::ReturnString( weapon );
+	if ( weapon ) {
+		idThread::ReturnString( weapon->weaponClassName );
 	} else {
 		idThread::ReturnString( "" );
 	}
@@ -7651,12 +8169,15 @@ idPlayer::Event_GetPreviousWeapon
 ==================
 */
 void idPlayer::Event_GetPreviousWeapon( void ) {
-	const char *weapon;
+	const inventoryWeapon_t *weapon;
 
-	if ( previousWeapon >= 0 ) {
-		int pw = ( gameLocal.world->spawnArgs.GetBool( "no_Weapons" ) ) ? 0 : previousWeapon;
-		weapon = spawnArgs.GetString( va( "def_weapon%d", pw) );
-		idThread::ReturnString( weapon );
+	if ( previousWeapon > 0 ) {
+		if ( gameLocal.world->spawnArgs.GetBool( "no_Weapons" ) ) {
+			weapon = inventory.GetWeapon( inventory.FindWeaponInSlot( weapon_fists ) );
+		} else {
+			weapon = inventory.GetWeapon( previousWeapon );
+		}
+		idThread::ReturnString( weapon ? weapon->weaponClassName.c_str() : "" );
 	} else {
 		idThread::ReturnString( spawnArgs.GetString( "def_weapon0" ) );
 	}
@@ -7668,7 +8189,6 @@ idPlayer::Event_SelectWeapon
 ==================
 */
 void idPlayer::Event_SelectWeapon( const char *weaponName ) {
-	int i;
 	int weaponNum;
 
 	if ( gameLocal.isClient ) {
@@ -7677,21 +8197,12 @@ void idPlayer::Event_SelectWeapon( const char *weaponName ) {
 	}
 
 	if ( hiddenWeapon && gameLocal.world->spawnArgs.GetBool( "no_Weapons" ) ) {
-		idealWeapon = weapon_fists;
+		idealWeapon = inventory.FindWeaponInSlot( weapon_fists );
 		weapon.GetEntity()->HideWeapon();
 		return;
 	}
 
-	weaponNum = -1;
-	for( i = 0; i < MAX_WEAPONS; i++ ) {
-		if ( inventory.weapons & ( 1 << i ) ) {
-			const char *weap = spawnArgs.GetString( va( "def_weapon%d", i ) );
-			if ( !idStr::Cmp( weap, weaponName ) ) {
-				weaponNum = i;
-				break;
-			}
-		}
-	}
+	weaponNum = inventory.FindWeaponByClassName( weaponName );
 
 	if ( weaponNum < 0 ) {
 		gameLocal.Warning( "%s is not carrying weapon '%s'", name.c_str(), weaponName );
@@ -8026,8 +8537,8 @@ void idPlayer::WriteToSnapshot( idBitMsgDelta &msg ) const {
 	msg.WriteBits( gameLocal.ServerRemapDecl( -1, DECL_ENTITYDEF, lastDamageDef ), gameLocal.entityDefBits );
 	msg.WriteDir( lastDamageDir, 9 );
 	msg.WriteShort( lastDamageLocation );
-	msg.WriteBits( idealWeapon, idMath::BitsForInteger( MAX_WEAPONS ) );
-	msg.WriteBits( inventory.weapons, MAX_WEAPONS );
+	msg.WriteInt( idealWeapon );
+	WriteWeaponInventoryToSnapshot( inventory, msg );
 	msg.WriteBits( weapon.GetSpawnId(), 32 );
 	msg.WriteBits( spectator, idMath::BitsForInteger( MAX_CLIENTS ) );
 	msg.WriteBits( lastHitToggle, 1 );
@@ -8063,8 +8574,8 @@ void idPlayer::ReadFromSnapshot( const idBitMsgDelta &msg ) {
 	lastDamageDef = gameLocal.ClientRemapDecl( DECL_ENTITYDEF, msg.ReadBits( gameLocal.entityDefBits ) );
 	lastDamageDir = msg.ReadDir( 9 );
 	lastDamageLocation = msg.ReadShort();
-	newIdealWeapon = msg.ReadBits( idMath::BitsForInteger( MAX_WEAPONS ) );
-	inventory.weapons = msg.ReadBits( MAX_WEAPONS );
+	newIdealWeapon = msg.ReadInt();
+	ReadWeaponInventoryFromSnapshot( *this, msg );
 	weaponSpawnId = msg.ReadBits( 32 );
 	spectator = msg.ReadBits( idMath::BitsForInteger( MAX_CLIENTS ) );
 	newHitToggle = msg.ReadBits( 1 ) != 0;
@@ -8173,14 +8684,11 @@ void idPlayer::WritePlayerStateToSnapshot( idBitMsgDelta &msg ) const {
 	msg.WriteByte( bobCycle );
 	msg.WriteInt( stepUpTime );
 	msg.WriteFloat( stepUpDelta );
-	msg.WriteShort( inventory.weapons );
+	WriteWeaponInventoryToSnapshot( inventory, msg );
 	msg.WriteByte( inventory.armor );
 
 	for( i = 0; i < AMMO_NUMTYPES; i++ ) {
 		msg.WriteBits( inventory.ammo[i], ASYNC_PLAYER_INV_AMMO_BITS );
-	}
-	for( i = 0; i < MAX_WEAPONS; i++ ) {
-		msg.WriteBits( inventory.clip[i], ASYNC_PLAYER_INV_CLIP_BITS );
 	}
 }
 
@@ -8195,7 +8703,7 @@ void idPlayer::ReadPlayerStateFromSnapshot( const idBitMsgDelta &msg ) {
 	bobCycle = msg.ReadByte();
 	stepUpTime = msg.ReadInt();
 	stepUpDelta = msg.ReadFloat();
-	inventory.weapons = msg.ReadShort();
+	ReadWeaponInventoryFromSnapshot( *this, msg );
 	inventory.armor = msg.ReadByte();
 
 	for( i = 0; i < AMMO_NUMTYPES; i++ ) {
@@ -8203,9 +8711,6 @@ void idPlayer::ReadPlayerStateFromSnapshot( const idBitMsgDelta &msg ) {
 		if ( gameLocal.time >= inventory.ammoPredictTime ) {
 			inventory.ammo[ i ] = ammo;
 		}
-	}
-	for( i = 0; i < MAX_WEAPONS; i++ ) {
-		inventory.clip[i] = msg.ReadBits( ASYNC_PLAYER_INV_CLIP_BITS );
 	}
 }
 
@@ -8224,6 +8729,13 @@ bool idPlayer::ServerReceiveEvent( int event, int time, const idBitMsg &msg ) {
 	switch( event ) {
 		case EVENT_IMPULSE: {
 			PerformImpulse( msg.ReadBits( 6 ) );
+			return true;
+		}
+		case EVENT_SELECT_WEAPON: {
+			const int weaponId = msg.ReadInt();
+			if ( inventory.HasWeapon( weaponId ) ) {
+				SelectWeapon( weaponId );
+			}
 			return true;
 		}
 		default: {
@@ -8417,7 +8929,13 @@ idPlayer::RemoveWeapon
 */
 void idPlayer::RemoveWeapon( const char *weap ) {
 	if ( weap && *weap ) {
-		inventory.Drop( spawnArgs, spawnArgs.GetString( weap ), -1 );
+		const char *weaponClassName = spawnArgs.GetString( weap );
+		if ( !weaponClassName || !*weaponClassName ) {
+			weaponClassName = weap;
+		}
+		while( inventory.FindWeaponByClassName( weaponClassName ) > 0 ) {
+			inventory.Drop( this, weaponClassName, -1 );
+		}
 	}
 }
 
@@ -8477,11 +8995,10 @@ idPlayer::Event_GetIdealWeapon
 ==================
 */
 void idPlayer::Event_GetIdealWeapon( void ) {
-	const char *weapon;
+	const inventoryWeapon_t *weapon = inventory.GetWeapon( idealWeapon );
 
-	if ( idealWeapon >= 0 ) {
-		weapon = spawnArgs.GetString( va( "def_weapon%d", idealWeapon ) );
-		idThread::ReturnString( weapon );
+	if ( weapon ) {
+		idThread::ReturnString( weapon->weaponClassName );
 	} else {
 		idThread::ReturnString( "" );
 	}

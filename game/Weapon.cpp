@@ -976,6 +976,9 @@ void idWeapon::GetWeaponDef( const char *objectname, int ammoinclip ) {
 		if ( ammoClip > ammoAvail ) {
 			ammoClip = ammoAvail;
 		}
+		if ( ammoClip > 0 ) {
+			owner->inventory.UseAmmo( ammoType, ammoClip );
+		}
 	}
 
 	renderEntity.gui[ 0 ] = NULL;
@@ -1082,10 +1085,10 @@ void idWeapon::UpdateGUI( void ) {
 		renderEntity.gui[ 0 ]->SetStateString( "player_ammo", "" );
 	} else {
 		// show remaining ammo
-		renderEntity.gui[ 0 ]->SetStateString( "player_totalammo", va( "%i", ammoamount - inclip) );
+		renderEntity.gui[ 0 ]->SetStateString( "player_totalammo", va( "%i", ammoamount ) );
 		renderEntity.gui[ 0 ]->SetStateString( "player_ammo", ClipSize() ? va( "%i", inclip ) : "--" );
 		renderEntity.gui[ 0 ]->SetStateString( "player_clips", ClipSize() ? va("%i", ammoamount / ClipSize()) : "--" );
-		renderEntity.gui[ 0 ]->SetStateString( "player_allammo", va( "%i/%i", inclip, ammoamount - inclip ) );
+		renderEntity.gui[ 0 ]->SetStateString( "player_allammo", va( "%i/%i", inclip, ammoamount ) );
 	}
 	renderEntity.gui[ 0 ]->SetStateBool( "player_ammo_empty", ( ammoamount == 0 ) );
 	renderEntity.gui[ 0 ]->SetStateBool( "player_clip_empty", ( inclip == 0 ) );
@@ -2483,12 +2486,14 @@ void idWeapon::Event_UseAmmo( int amount ) {
 		return;
 	}
 
-	owner->inventory.UseAmmo( ammoType, ( powerAmmo ) ? amount : ( amount * ammoRequired ) );
+	const int ammoToUse = powerAmmo ? amount : ( amount * ammoRequired );
 	if ( clipSize && ammoRequired ) {
-		ammoClip -= powerAmmo ? amount : ( amount * ammoRequired );
+		ammoClip -= ammoToUse;
 		if ( ammoClip < 0 ) {
 			ammoClip = 0;
 		}
+	} else {
+		owner->inventory.UseAmmo( ammoType, ammoToUse );
 	}
 }
 
@@ -2498,21 +2503,21 @@ idWeapon::Event_AddToClip
 ===============
 */
 void idWeapon::Event_AddToClip( int amount ) {
-	int ammoAvail;
-
 	if ( gameLocal.isClient ) {
 		return;
 	}
 
+	const int oldAmmo = ammoClip;
+	const int ammoAvail = owner->inventory.HasAmmo( ammoType, ammoRequired ) + ammoClip;
 	ammoClip += amount;
 	if ( ammoClip > clipSize ) {
 		ammoClip = clipSize;
 	}
 
-	ammoAvail = owner->inventory.HasAmmo( ammoType, ammoRequired );
 	if ( ammoClip > ammoAvail ) {
 		ammoClip = ammoAvail;
 	}
+	owner->inventory.UseAmmo( ammoType, ammoClip - oldAmmo );
 }
 
 /*
@@ -2532,6 +2537,9 @@ idWeapon::Event_AmmoAvailable
 */
 void idWeapon::Event_AmmoAvailable( void ) {
 	int ammoAvail = owner->inventory.HasAmmo( ammoType, ammoRequired );
+	if ( clipSize ) {
+		ammoAvail += ammoClip;
+	}
 	idThread::ReturnFloat( ammoAvail );
 }
 
@@ -2835,9 +2843,10 @@ void idWeapon::Event_LaunchProjectiles( int num_projectiles, float spread, float
 	// avoid all ammo considerations on an MP client
 	if ( !gameLocal.isClient ) {
 
-		// check if we're out of ammo or the clip is empty
-		int ammoAvail = owner->inventory.HasAmmo( ammoType, ammoRequired );
-		if ( !ammoAvail || ( ( clipSize != 0 ) && ( ammoClip <= 0 ) ) ) {
+		if ( ( clipSize != 0 ) && ( ammoClip <= 0 ) ) {
+			return;
+		}
+		if ( ( clipSize == 0 ) && !owner->inventory.HasAmmo( ammoType, ammoRequired ) ) {
 			return;
 		}
 
@@ -2854,9 +2863,11 @@ void idWeapon::Event_LaunchProjectiles( int num_projectiles, float spread, float
 			}
 		}
 
-		owner->inventory.UseAmmo( ammoType, ( powerAmmo ) ? dmgPower : ammoRequired );
+		if ( clipSize == 0 ) {
+			owner->inventory.UseAmmo( ammoType, powerAmmo ? dmgPower : ammoRequired );
+		}
 		if ( clipSize && ammoRequired ) {
-			ammoClip -= powerAmmo ? dmgPower : 1;
+			ammoClip -= powerAmmo ? dmgPower : ammoRequired;
 		}
 
 	}

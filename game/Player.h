@@ -30,6 +30,7 @@ If you have questions concerning this license or the applicable additional terms
 #define __GAME_PLAYER_H__
 
 #include "idlib/math/Interpolate.h"
+#include "idlib/containers/HashIndex.h"
 
 #include "physics/Physics_Player.h"
 #include "Item.h"
@@ -65,6 +66,7 @@ const int	FOCUS_TIME = 300;
 const int	FOCUS_GUI_TIME = 500;
 
 const int MAX_WEAPONS = 16;
+const int MAX_WEAPON_INSTANCES = 64;
 
 const int DEAD_HEARTRATE = 0;			// fall to as you die
 const int LOWHEALTH_HEARTRATE_ADJ = 20; //
@@ -97,6 +99,13 @@ struct idLevelTriggerInfo {
 	idStr triggerName;
 };
 
+struct inventoryWeapon_t {
+	int						id;
+	idStr					weaponClassName;
+	int						weaponSlot;
+	int						clip;
+};
+
 // powerups - the "type" in item .def must match
 enum {
 	BERSERK = 0,
@@ -125,12 +134,13 @@ enum {
 class idInventory {
 public:
 	int						maxHealth;
-	int						weapons;
+	idList<inventoryWeapon_t>	weaponInstances;
+	idHashIndex				weaponInstanceIndex;
+	int						nextWeaponInstanceId;
 	int						powerups;
 	int						armor;
 	int						maxarmor;
 	int						ammo[ AMMO_NUMTYPES ];
-	int						clip[ MAX_WEAPONS ];
 	int						powerupEndTime[ MAX_POWERUPS ];
 
 	// mp
@@ -162,7 +172,7 @@ public:
 
 	idList<idLevelTriggerInfo> levelTriggers;
 
-							idInventory() { Clear(); }
+								idInventory() : weaponInstanceIndex( 128, MAX_WEAPON_INSTANCES ) { Clear(); }
 							~idInventory() { Clear(); }
 
 	// save games
@@ -175,17 +185,33 @@ public:
 	void					GetPersistantData( idDict &dict );
 	void					RestoreInventory( idPlayer *owner, const idDict &dict );
 	bool					Give( idPlayer *owner, const idDict &spawnArgs, const char *statname, const char *value, int *idealWeapon, bool updateHud );
-	void					Drop( const idDict &spawnArgs, const char *weapon_classname, int weapon_index );
+	int						AddWeapon( const char *weaponClassName, int weaponSlot, int clip = -1, int requestedWeaponId = -1 );
+	void					Drop( idPlayer *owner, const char *weaponClassName, int weaponId );
+	bool					HasWeapon( int weaponId ) const;
+	bool					HasWeaponInSlot( int weaponSlot ) const;
+	const inventoryWeapon_t *GetWeapon( int weaponId ) const;
+	int						GetWeaponSlot( int weaponId ) const;
+	const char *			GetWeaponClassName( int weaponId ) const;
+	int						GetWeaponClip( int weaponId ) const;
+	bool					SetWeaponClip( int weaponId, int clip );
+	int						FindWeaponInSlot( int weaponSlot, int excludeWeaponId = -1 ) const;
+	int						FindNewestWeaponInSlot( int weaponSlot ) const;
+	int						FindWeaponByClassName( const char *weaponClassName ) const;
+	bool					HasAmmoForWeapon( int weaponId ) const;
+	int						GetNextWeaponInstanceId( void ) const;
+	int						GetNumWeapons( void ) const;
+	void					GetSortedWeaponIdsById( idList<int> &weaponIds ) const;
+	void					GetSortedWeaponIdsBySlot( idList<int> &weaponIds ) const;
 	ammo_t					AmmoIndexForAmmoClass( const char *ammo_classname ) const;
 	int						MaxAmmoForAmmoClass( idPlayer *owner, const char *ammo_classname ) const;
 	int						WeaponIndexForAmmoClass( const idDict & spawnArgs, const char *ammo_classname ) const;
-	ammo_t					AmmoIndexForWeaponClass( const char *weapon_classname, int *ammoRequired );
+	ammo_t					AmmoIndexForWeaponClass( const char *weapon_classname, int *ammoRequired ) const;
 	const char *			AmmoPickupNameForIndex( ammo_t ammonum ) const;
 	void					AddPickupName( const char *name, const char *icon );
 
-	int						HasAmmo( ammo_t type, int amount );
+	int						HasAmmo( ammo_t type, int amount ) const;
 	bool					UseAmmo( ammo_t type, int amount );
-	int						HasAmmo( const char *weapon_classname );			// looks up the ammo information for the weapon class first
+	int						HasAmmo( const char *weapon_classname ) const;		// looks up the ammo information for the weapon class first
 
 	void					UpdateArmor( void );
 
@@ -210,6 +236,7 @@ class idPlayer : public idActor {
 public:
 	enum {
 		EVENT_IMPULSE = idEntity::EVENT_MAXEVENTS,
+		EVENT_SELECT_WEAPON,
 		EVENT_EXIT_TELEPORTER,
 		EVENT_ABORT_TELEPORTER,
 		EVENT_POWERUP,
@@ -433,7 +460,17 @@ public:
 	void					NextWeapon( void );
 	void					NextBestWeapon( void );
 	void					PrevWeapon( void );
-	void					SelectWeapon( int num, bool force );
+	void					SelectWeapon( int weaponId );
+	int						GetCurrentWeaponId( void ) const;
+	int						GetIdealWeaponId( void ) const;
+	int						GetWeaponAlias( int impulseSlot ) const;
+	int						ResolveWeaponAlias( int impulseSlot ) const;
+	bool					BindWeaponAlias( int impulseSlot, int weaponId );
+	void					ClearWeaponAlias( int impulseSlot );
+	void					ClearWeaponAliases( void );
+	void					SetDefaultWeaponAlias( int impulseSlot, int weaponId );
+	void					ValidateWeaponAliases( void );
+	void					RemoveWeaponAlias( int weaponId );
 	void					DropWeapon( bool died ) ;
 	void					StealWeapon( idPlayer *player );
 	void					AddProjectilesFired( int count );
@@ -552,6 +589,7 @@ private:
 	int						currentWeapon;
 	int						idealWeapon;
 	int						previousWeapon;
+	int						weaponAliases[ MAX_WEAPONS ];
 	int						weaponSwitchTime;
 	bool					weaponEnabled;
 	bool					showWeaponViewModel;

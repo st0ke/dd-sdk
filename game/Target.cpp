@@ -1653,7 +1653,10 @@ void idTarget_RemoveWeapons::Event_Activate( idEntity *activator ) {
 				player->RemoveWeapon( kv->GetValue() );
 				kv = spawnArgs.MatchPrefix( "weapon", kv );
 			}
-			player->SelectWeapon( player->weapon_fists, true );
+			const int fistsWeapon = player->inventory.FindWeaponInSlot( player->weapon_fists );
+			if ( fistsWeapon > 0 ) {
+				player->SelectWeapon( fistsWeapon );
+			}
 		}
 	}
 }

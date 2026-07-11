@@ -327,7 +327,12 @@ void Cmd_Give_f( const idCmdArgs &args ) {
 	}
 
 	if ( give_all || idStr::Icmp( name, "weapons" ) == 0 ) {
-		player->inventory.weapons = BIT( MAX_WEAPONS ) - 1;
+		for( i = 0; i < MAX_WEAPONS; i++ ) {
+			const char *weaponClassName = player->spawnArgs.GetString( va( "def_weapon%d", i ) );
+			if ( weaponClassName && *weaponClassName ) {
+				player->Give( "weapon", weaponClassName );
+			}
+		}
 		player->CacheWeapons();
 
 		if ( !give_all ) {
@@ -374,6 +379,118 @@ void Cmd_Give_f( const idCmdArgs &args ) {
 	if ( !give_all && !player->Give( args.Argv(1), args.Argv(2) ) ) {
 		gameLocal.Printf( "unknown item\n" );
 	}
+}
+
+namespace {
+
+bool ParseIntegerArg( const char *text, int &value ) {
+	if ( !text || !*text ) {
+		return false;
+	}
+
+	const char *cursor = text;
+	if ( *cursor == '-' ) {
+		cursor++;
+		if ( !*cursor ) {
+			return false;
+		}
+	}
+
+	for( ; *cursor; cursor++ ) {
+		if ( !idStr::CharIsNumeric( *cursor ) ) {
+			return false;
+		}
+	}
+
+	value = atoi( text );
+	return true;
+}
+
+}
+
+/*
+==================
+Cmd_WeaponList_f
+==================
+*/
+void Cmd_WeaponList_f( const idCmdArgs &args ) {
+	idPlayer *player = gameLocal.GetLocalPlayer();
+	if ( !player ) {
+		return;
+	}
+
+	idList<int> weaponIds;
+	player->inventory.GetSortedWeaponIdsBySlot( weaponIds );
+
+	gameLocal.Printf( "owned weapons:\n" );
+	for( int i = 0; i < weaponIds.Num(); i++ ) {
+		const inventoryWeapon_t *weapon = player->inventory.GetWeapon( weaponIds[ i ] );
+		if ( !weapon ) {
+			continue;
+		}
+		const char marker = ( weapon->id == player->GetCurrentWeaponId() ) ? '*' : ' ';
+		gameLocal.Printf( "%c id %d slot %d %s\n", marker, weapon->id, weapon->weaponSlot, weapon->weaponClassName.c_str() );
+	}
+
+	gameLocal.Printf( "weapon aliases:\n" );
+	for( int i = 0; i <= 12; i++ ) {
+		const int weaponId = player->GetWeaponAlias( i );
+		const inventoryWeapon_t *weapon = player->inventory.GetWeapon( weaponId );
+		if ( weapon ) {
+			gameLocal.Printf( "_impulse%d -> id %d slot %d %s\n", i, weapon->id, weapon->weaponSlot, weapon->weaponClassName.c_str() );
+		} else if ( weaponId > 0 ) {
+			gameLocal.Printf( "_impulse%d -> missing id %d\n", i, weaponId );
+		} else {
+			gameLocal.Printf( "_impulse%d -> none\n", i );
+		}
+	}
+}
+
+/*
+==================
+Cmd_WeaponBind_f
+==================
+*/
+void Cmd_WeaponBind_f( const idCmdArgs &args ) {
+	idPlayer *player = gameLocal.GetLocalPlayer();
+	if ( !player ) {
+		return;
+	}
+
+	if ( args.Argc() != 3 ) {
+		gameLocal.Printf( "usage: weaponBind <impulseSlot> <weaponId|none>\n" );
+		return;
+	}
+
+	int impulseSlot;
+	if ( !ParseIntegerArg( args.Argv( 1 ), impulseSlot ) ) {
+		gameLocal.Printf( "weaponBind: impulseSlot must be 0..12\n" );
+		return;
+	}
+
+	if ( impulseSlot < 0 || impulseSlot > 12 ) {
+		gameLocal.Printf( "weaponBind: impulseSlot must be 0..12\n" );
+		return;
+	}
+
+	if ( idStr::Icmp( args.Argv( 2 ), "none" ) == 0 ) {
+		player->ClearWeaponAlias( impulseSlot );
+		gameLocal.Printf( "_impulse%d cleared\n", impulseSlot );
+		return;
+	}
+
+	int weaponId;
+	if ( !ParseIntegerArg( args.Argv( 2 ), weaponId ) ) {
+		gameLocal.Printf( "weaponBind: weaponId must be an owned weapon id or 'none'\n" );
+		return;
+	}
+
+	if ( !player->BindWeaponAlias( impulseSlot, weaponId ) ) {
+		gameLocal.Printf( "weaponBind: weapon id %d is not owned\n", weaponId );
+		return;
+	}
+
+	gameLocal.Printf( "_impulse%d -> id %d\n", impulseSlot, weaponId );
 }
 
 /*
@@ -2380,6 +2497,8 @@ void idGameLocal::InitConsoleCommands( void ) {
 	cmdSystem->AddCommand( "addChatLine",			Cmd_AddChatLine_f,			CMD_FL_GAME,				"internal use - core to game chat lines" );
 	cmdSystem->AddCommand( "gameKick",				Cmd_Kick_f,					CMD_FL_GAME,				"same as kick, but recognizes player names" );
 	cmdSystem->AddCommand( "give",					Cmd_Give_f,					CMD_FL_GAME|CMD_FL_CHEAT,	"gives one or more items" );
+	cmdSystem->AddCommand( "weaponList",			Cmd_WeaponList_f,			CMD_FL_GAME,				"lists owned weapon instances and aliases" );
+	cmdSystem->AddCommand( "weaponBind",			Cmd_WeaponBind_f,			CMD_FL_GAME,				"binds an impulse slot to an owned weapon id" );
 	cmdSystem->AddCommand( "centerview",			Cmd_CenterView_f,			CMD_FL_GAME,				"centers the view" );
 	cmdSystem->AddCommand( "god",					Cmd_God_f,					CMD_FL_GAME|CMD_FL_CHEAT,	"enables god mode" );
 	cmdSystem->AddCommand( "notarget",				Cmd_Notarget_f,				CMD_FL_GAME|CMD_FL_CHEAT,	"disables the player as a target" );

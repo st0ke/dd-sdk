@@ -2,7 +2,9 @@
 
 - This is a CMake project.
 - Use `../../build/dd-sdk-vscode/RelWithDebInfo` as the build directory for compilation checks and unit test execution.
+- Resource files (scripts, textures, models, etc.) are placed in the `../../data/sandbox001` directory and controlled by another Git repository.
 - Format C++ files via the clang-format command only when the edited file is in a directory containing `.clang-format` or recursively below it. Currently, only `game/mapgen` has a `.clang-format`, so do not run clang-format on C++ files outside `game/mapgen`, such as `game/gamesys/SysCmds.cpp`.
+- Place report files (e.g., when an answer is too large) in the `ai-reports/` directory. Add the creation date to the beginning of each filename.
 
 ## C++ Code Style
 

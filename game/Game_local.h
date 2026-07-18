@@ -44,6 +44,7 @@ If you have questions concerning this license or the applicable additional terms
 #include "anim/Anim.h"
 #include "Pvs.h"
 #include "MultiplayerGame.h"
+#include "CombatScaling.h"
 
 #ifdef ID_DEBUG_UNINITIALIZED_MEMORY
 // This is real evil but allows the code to inspect arbitrary class variables.
@@ -383,6 +384,7 @@ public:
 
 	const idDeclEntityDef *	FindEntityDef( const char *name, bool makeDefault = true ) const;
 	const idDict *			FindEntityDefDict( const char *name, bool makeDefault = true ) const;
+	const idCombatScaling &	GetCombatScaling( void ) const;
 
 	void					RegisterEntity( idEntity *ent );
 	void					UnregisterEntity( idEntity *ent );
@@ -463,6 +465,7 @@ private:
 	idStr					mapFileName;			// name of the map, empty string if no map loaded
 	idMapFile *				mapFile;				// will be NULL during the game unless in-game editing is used
 	bool					mapCycleLoaded;
+	idCombatScaling			combatScaling;
 
 	int						spawnCount;
 	int						mapSpawnCount;			// it's handy to know which entities are part of the map
@@ -517,6 +520,7 @@ private:
 							// commons used by init, shutdown, and restart
 	void					MapPopulate( void );
 	void					MapClear( bool clearClients );
+	void					InitCombatScaling( void );
 
 	pvsHandle_t				GetClientPVS( idPlayer *player, pvsType_t type );
 	void					SetupPlayerPVS( void );

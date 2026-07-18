@@ -22,6 +22,7 @@ set(src_game_mod
 	# add additional .cpp files of your mod in game/
 	# (that you added to the ones already existant in the SDK/in dhewm3)
 	# like "game/MyFile.cpp" (without quotes, one file per line)
+	game/CombatScaling.cpp
 )
 
 set(src_d3xp_mod
@@ -637,6 +638,15 @@ if(BUILD_TESTING)
 	target_include_directories(mapgen_test PRIVATE "${CMAKE_SOURCE_DIR}/game")
 	target_link_libraries(mapgen_test idlib)
 	add_test(NAME mapgen_test COMMAND mapgen_test)
+
+	add_executable(combat_scaling_test
+		game/tests/CombatScalingTest.cpp
+		game/CombatScaling.cpp
+	)
+	set_target_properties(combat_scaling_test PROPERTIES COMPILE_DEFINITIONS "${BASE_DEFS}")
+	target_include_directories(combat_scaling_test PRIVATE "${CMAKE_SOURCE_DIR}/game")
+	target_link_libraries(combat_scaling_test idlib)
+	add_test(NAME combat_scaling_test COMMAND combat_scaling_test)
 endif()
 
 if(BASE)

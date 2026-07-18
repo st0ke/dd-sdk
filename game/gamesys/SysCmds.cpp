@@ -446,6 +446,55 @@ void Cmd_WeaponList_f( const idCmdArgs &args ) {
 	}
 }
 
+namespace {
+
+/*
+==================
+Cmd_CombatScale_f
+==================
+*/
+void Cmd_CombatScale_f( const idCmdArgs &args ) {
+	if ( args.Argc() < 1 || args.Argc() > 3 ) {
+		gameLocal.Printf( "usage: combatScale [level [endLevel]]\n" );
+		return;
+	}
+
+	const idCombatScaling &scaling = gameLocal.GetCombatScaling();
+	if ( !scaling.IsInitialized() ) {
+		gameLocal.Printf( "combatScale: combat scaling is not initialized\n" );
+		return;
+	}
+
+	int firstLevel = scaling.GetMinLevel();
+	int lastLevel = scaling.GetMaxLevel();
+	if ( args.Argc() >= 2 && !ParseIntegerArg( args.Argv( 1 ), firstLevel ) ) {
+		gameLocal.Printf( "combatScale: level must be an integer\n" );
+		return;
+	}
+	if ( args.Argc() == 3 && !ParseIntegerArg( args.Argv( 2 ), lastLevel ) ) {
+		gameLocal.Printf( "combatScale: endLevel must be an integer\n" );
+		return;
+	}
+	if ( args.Argc() == 2 ) {
+		lastLevel = firstLevel;
+	}
+	if ( firstLevel < scaling.GetMinLevel() || firstLevel > scaling.GetMaxLevel() ||
+			lastLevel < scaling.GetMinLevel() || lastLevel > scaling.GetMaxLevel() ||
+			lastLevel < firstLevel ) {
+		gameLocal.Printf( "combatScale: range must be within %d..%d and ordered\n",
+			scaling.GetMinLevel(), scaling.GetMaxLevel() );
+		return;
+	}
+
+	gameLocal.Printf( "combat scaling: growth %.6g, levels %d..%d\n",
+		scaling.GetGrowth(), scaling.GetMinLevel(), scaling.GetMaxLevel() );
+	for( int level = firstLevel; level <= lastLevel; level++ ) {
+		gameLocal.Printf( "S(%d) = %.6f\n", level, scaling.LevelScale( level ) );
+	}
+}
+
+}
+
 /*
 ==================
 Cmd_WeaponBind_f
@@ -2499,6 +2548,7 @@ void idGameLocal::InitConsoleCommands( void ) {
 	cmdSystem->AddCommand( "give",					Cmd_Give_f,					CMD_FL_GAME|CMD_FL_CHEAT,	"gives one or more items" );
 	cmdSystem->AddCommand( "weaponList",			Cmd_WeaponList_f,			CMD_FL_GAME,				"lists owned weapon instances and aliases" );
 	cmdSystem->AddCommand( "weaponBind",			Cmd_WeaponBind_f,			CMD_FL_GAME,				"binds an impulse slot to an owned weapon id" );
+	cmdSystem->AddCommand( "combatScale",			Cmd_CombatScale_f,			CMD_FL_GAME,				"prints cached combat level scales" );
 	cmdSystem->AddCommand( "centerview",			Cmd_CenterView_f,			CMD_FL_GAME,				"centers the view" );
 	cmdSystem->AddCommand( "god",					Cmd_God_f,					CMD_FL_GAME|CMD_FL_CHEAT,	"enables god mode" );
 	cmdSystem->AddCommand( "notarget",				Cmd_Notarget_f,				CMD_FL_GAME|CMD_FL_CHEAT,	"disables the player as a target" );

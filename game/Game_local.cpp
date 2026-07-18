@@ -855,6 +855,8 @@ void idGameLocal::LoadMap( const char *mapName, int randseed ) {
 	int i;
 	bool sameMap = (mapFile && idStr::Icmp(mapFileName, mapName) == 0);
 
+	InitCombatScaling();
+
 	// clear the sound system
 	gameSoundWorld->ClearAllSoundEmitters();
 
@@ -996,6 +998,8 @@ void idGameLocal::LocalMapRestart( ) {
 	gamestate = GAMESTATE_STARTUP;
 
 	program.Restart();
+
+	InitCombatScaling();
 
 	InitScriptForMap();
 
@@ -3163,6 +3167,32 @@ idGameLocal::FindEntityDefDict
 const idDict *idGameLocal::FindEntityDefDict( const char *name, bool makeDefault ) const {
 	const idDeclEntityDef *decl = FindEntityDef( name, makeDefault );
 	return decl ? &decl->dict : NULL;
+}
+
+/*
+================
+idGameLocal::GetCombatScaling
+================
+*/
+const idCombatScaling &idGameLocal::GetCombatScaling( void ) const {
+	return combatScaling;
+}
+
+/*
+================
+idGameLocal::InitCombatScaling
+================
+*/
+void idGameLocal::InitCombatScaling( void ) {
+	const idDict *config = FindEntityDefDict( "dd_combat_progression", false );
+	if ( !config ) {
+		Error( "Missing entityDef 'dd_combat_progression'" );
+	}
+
+	idStr error;
+	if ( !combatScaling.Init( *config, error ) ) {
+		Error( "Invalid entityDef 'dd_combat_progression': %s", error.c_str() );
+	}
 }
 
 /*

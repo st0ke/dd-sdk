@@ -4447,6 +4447,26 @@ idUserInterface *idPlayer::ActiveGui( void ) {
 
 /*
 ===============
+idPlayer::LoadWeaponInstance
+===============
+*/
+bool idPlayer::LoadWeaponInstance( int weaponId ) {
+	const inventoryWeapon_t *instance = inventory.GetWeapon( weaponId );
+	if ( !instance ) {
+		return false;
+	}
+
+	assert( weapon.GetEntity() );
+	const idStr weaponDefName = instance->weaponClassName;
+	weapon.GetEntity()->GetWeaponDef( weaponDefName, instance->clip );
+
+	animPrefix = weaponDefName;
+	animPrefix.Strip( "weapon_" );
+	return true;
+}
+
+/*
+===============
 idPlayer::Weapon_Combat
 ===============
 */
@@ -4471,8 +4491,7 @@ void idPlayer::Weapon_Combat( void ) {
 	}
 
 	if ( idealWeapon != currentWeapon ) {
-		const inventoryWeapon_t *ideal = inventory.GetWeapon( idealWeapon );
-		if ( !ideal ) {
+		if ( !inventory.HasWeapon( idealWeapon ) ) {
 			idealWeapon = currentWeapon;
 			return;
 		}
@@ -4481,9 +4500,9 @@ void idPlayer::Weapon_Combat( void ) {
 
 			currentWeapon = idealWeapon;
 			weaponGone = false;
-			animPrefix = ideal->weaponClassName;
-			weapon.GetEntity()->GetWeaponDef( animPrefix, ideal->clip );
-			animPrefix.Strip( "weapon_" );
+			if ( !LoadWeaponInstance( currentWeapon ) ) {
+				return;
+			}
 
 			weapon.GetEntity()->NetCatchup();
 			const function_t *newstate = GetScriptFunction( "NetCatchup" );
@@ -4506,9 +4525,9 @@ void idPlayer::Weapon_Combat( void ) {
 				}
 				currentWeapon = idealWeapon;
 				weaponGone = false;
-				animPrefix = ideal->weaponClassName;
-				weapon.GetEntity()->GetWeaponDef( animPrefix, ideal->clip );
-				animPrefix.Strip( "weapon_" );
+				if ( !LoadWeaponInstance( currentWeapon ) ) {
+					return;
+				}
 
 				weapon.GetEntity()->Raise();
 			}
@@ -4672,10 +4691,7 @@ void idPlayer::UpdateWeapon( void ) {
 
 	// always make sure the weapon is correctly setup before accessing it
 	if ( !weapon.GetEntity()->IsLinked() ) {
-		const inventoryWeapon_t *ideal = inventory.GetWeapon( idealWeapon );
-		if ( ideal ) {
-			animPrefix = ideal->weaponClassName;
-			weapon.GetEntity()->GetWeaponDef( animPrefix, ideal->clip );
+		if ( LoadWeaponInstance( idealWeapon ) ) {
 			assert( weapon.GetEntity()->IsLinked() );
 		} else {
 			return;

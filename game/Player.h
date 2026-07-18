@@ -706,6 +706,7 @@ private:
 
 	void					StopFiring( void );
 	void					FireWeapon( void );
+	bool					LoadWeaponInstance( int weaponId );
 	void					Weapon_Combat( void );
 	void					Weapon_NPC( void );
 	void					Weapon_GUI( void );
